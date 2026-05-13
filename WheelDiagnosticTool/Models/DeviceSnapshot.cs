@@ -8,7 +8,22 @@ namespace WheelDiagnosticTool.Models;
 /// </summary>
 public sealed class AxisDescriptor
 {
-    public string Name { get; init; } = ""; // lX, lY, lZ, lRx, lRy, lRz, slider[0], slider[1]
+    // DI-offset-derived name: lX, lY, lZ, lRx, lRy, lRz, slider[0], slider[1].
+    // This is what the poller and the captures key off, so it must match the
+    // DIJOYSTATE2 byte offset, NOT the HID-reported display name. The HID
+    // name often disagrees (a "Y-Axis" can land on the lRz offset etc.).
+    public string Name { get; init; } = "";
+
+    // The display name DirectInput reports (often the HID usage name, like
+    // "Y-Axis" / "Z Rotation"). Kept separately for the HID-usage-table
+    // section of the report — useful but NOT used for correlating axis
+    // observations against captures.
+    public string HidName { get; init; } = "";
+
+    // DIJOYSTATE2 byte offset (0=lX, 4=lY, 8=lZ, 12=lRx, 16=lRy, 20=lRz,
+    // 24=slider[0], 28=slider[1]). -1 = unknown.
+    public int DIByteOffset { get; init; } = -1;
+
     public int Min { get; init; }
     public int Max { get; init; }
     public bool HasUsage { get; init; }

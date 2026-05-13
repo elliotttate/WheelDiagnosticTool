@@ -166,7 +166,7 @@ public static class MappingAnalysis
 
         s.FlatOutPredictionLines.Add($"For device VID=0x{dev.VendorId:X4} PID=0x{dev.ProductId:X4} \"{dev.ProductName}\":");
 
-        var rule = ResolveFlatOutRule(dev);
+        var rule = ResolveFlatOutRule(dev, s);
         if (rule == null)
         {
             s.FlatOutPredictionLines.Add("  No hardcoded entry in WheelDeviceDB / classifier for this VID/PID combination.");
@@ -194,46 +194,108 @@ public static class MappingAnalysis
         bool DirectDrive,
         string? Caveat);
 
-    private static FlatOutRule? ResolveFlatOutRule(DiDeviceSnapshot d)
+    /// <summary>
+    /// Did the user's captures show meaningful travel on a given axis?
+    /// Returned by inspecting all PEDAL_* steps for a >5000-unit deflection on
+    /// the named axis. Used by the dead-lZ fallback that mirrors the game's
+    /// `logitech_ghub_lz_stuck_legacy_fallback` repair path.
+    /// </summary>
+    private static bool AxisShowedTravel(DiagnosticSession s, string axisName, int threshold = 5000)
+    {
+        foreach (var step in s.CaptureSteps)
+        {
+            if (step.Skipped) continue;
+            if (!step.StepId.StartsWith("PEDAL_")) continue;
+            foreach (var obs in step.Axes)
+            {
+                if (string.Equals(obs.AxisName, axisName, StringComparison.Ordinal)
+                    && obs.MaxDeltaFromBaseline >= threshold)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static FlatOutRule? ResolveFlatOutRule(DiDeviceSnapshot d, DiagnosticSession s)
     {
         uint vid = d.VendorId & 0xFFFFu;
         uint pid = d.ProductId & 0xFFFFu;
         string name = d.ProductName?.ToLowerInvariant() ?? "";
 
-        // ── Logitech ──────────────────────────────────────────────
+        // ── Logitech (VID 0x046D) ─────────────────────────────────
+        // PIDs from PlayAll/Code/Runtime/Win32/PlayAll/Drivers/Input/InputDriverPC.h
         if (vid == 0x046D)
         {
-            // G29 / G923 PS / G923 Xbox / DFGT / G27 / DFPro all share the
-            // same released-high layout in legacy mode; G HUB rewrites the
-            // axes to a different layout.
+            // Correct PIDs (the previous tool revision had G923_PS and
+            // G923_XBOX swapped, which is why a real G923 Xbox showed
+            // "no hardcoded entry"):
             bool isG29   = pid == 0xC24F;
             bool isG27   = pid == 0xC29B;
             bool isDfgt  = pid == 0xC29A;
-            bool isG923P = pid == 0xC267;
-            bool isG923X = pid == 0xC266;
+            bool isG923P = pid == 0xC266; // PRODUCTID_LOGITECH_G923_PS
+            bool isG923X = pid == 0xC26E; // PRODUCTID_LOGITECH_G923_XBOX
             bool isG920  = pid == 0xC262;
+            bool isGPro  = pid == 0xC272 || pid == 0xC279; // G PRO / G PRO Xbox (best-effort PIDs)
+            bool isRs50  = pid == 0xC27B;
 
             if (isG29 || isG923P || isG923X)
             {
+                // Dead-lZ fallback: mirrors the in-game
+                // `logitech_ghub_lz_stuck_legacy_fallback` repair path. If
+                // the user's PEDAL_THROTTLE / PEDAL_BRAKE / PEDAL_CLUTCH
+                // captures show lY and lRz / slider[0] moving but lZ never
+                // budged, predict the legacy layout (throttle=lY,
+                // brake=lRz, clutch=slider[0]) instead of the G HUB layout.
+                bool lzMoved      = AxisShowedTravel(s, "lZ");
+                bool lyMoved      = AxisShowedTravel(s, "lY");
+                bool lRzMoved     = AxisShowedTravel(s, "lRz");
+                bool slider0Moved = AxisShowedTravel(s, "slider[0]");
+                bool deadLzFallback = !lzMoved && lyMoved && (lRzMoved || slider0Moved);
+
+                string ruleLabel = isG923X
+                    ? "Logitech G923 (Xbox, PID 0xC26E)"
+                    : isG923P
+                        ? "Logitech G923 (PS, PID 0xC266)"
+                        : "Logitech G29 (PID 0xC24F)";
+
+                if (deadLzFallback)
+                {
+                    return new FlatOutRule(
+                        Name: ruleLabel + " — DEAD-lZ legacy fallback active",
+                        SlotRouting: "WHEEL slot 1 (FFB); pedals on wheel device",
+                        AxisMap: new()
+                        {
+                            ("STEER",    "lX"),
+                            ("THROTTLE", "lY  — released-high, inverted (lZ showed no travel, legacy layout)"),
+                            ("BRAKE",    "lRz — released-high, inverted"),
+                            ("CLUTCH",   "slider[0] — released-high, inverted"),
+                        },
+                        DirectDrive: false,
+                        Caveat: "lZ showed zero travel during pedal capture. The engine's " +
+                                "`logitech_ghub_lz_stuck_legacy_fallback` repair path would activate " +
+                                "and map throttle=lY, brake=lRz, clutch=slider[0] regardless of " +
+                                "whether G HUB reports the modern axis layout.");
+                }
+
                 return new FlatOutRule(
-                    Name: $"Logitech G29/G923 class (PID 0x{pid:X4})",
-                    SlotRouting: "WHEEL slot 1 (FFB), pedals routed to wheel slot",
+                    Name: ruleLabel,
+                    SlotRouting: "WHEEL slot 1 (FFB); pedals on wheel device",
                     AxisMap: new()
                     {
                         ("STEER",    "lX"),
-                        ("THROTTLE", "lY (G HUB) or lRz (legacy)  — released-high, inverted"),
-                        ("BRAKE",    "lRz (G HUB) or slider[0] (legacy) — released-high, inverted"),
-                        ("CLUTCH",   "slider[0] (G HUB) or lY (legacy) — released-high, inverted"),
+                        ("THROTTLE", "lZ (G HUB) / lY (legacy)  — released-high, inverted"),
+                        ("BRAKE",    "lRz (both modes)           — released-high, inverted"),
+                        ("CLUTCH",   "lY (G HUB) / slider[0] (legacy) — released-high, inverted"),
                     },
                     DirectDrive: false,
-                    Caveat: "Layout depends on G HUB axis-mode toggle. Repair path " +
-                            "`logitech_ghub_lz_stuck_legacy_fallback` exists for users where lZ is " +
-                            "frozen and we fall back to the legacy layout.");
+                    Caveat: "Layout depends on G HUB axis-mode toggle. If pedal captures show lZ at " +
+                            "zero travel, the engine's `logitech_ghub_lz_stuck_legacy_fallback` repair " +
+                            "kicks in and uses the legacy layout (throttle=lY, brake=lRz, clutch=slider[0]).");
             }
             if (isG920)
             {
                 return new FlatOutRule(
-                    Name: "Logitech G920 (Xbox-class)",
+                    Name: "Logitech G920 (PID 0xC262)",
                     SlotRouting: "WHEEL slot 1; H-shifter binds via paddle buttons when G HUB-merged",
                     AxisMap: new()
                     {
@@ -261,16 +323,32 @@ public static class MappingAnalysis
                     DirectDrive: false,
                     Caveat: null);
             }
+            if (isGPro || isRs50)
+            {
+                return new FlatOutRule(
+                    Name: isRs50 ? "Logitech RS50 Base" : "Logitech G PRO Racing Wheel",
+                    SlotRouting: "WHEEL slot 1 (DD-friendly); pedals usually on a separate device",
+                    AxisMap: new()
+                    {
+                        ("STEER",    "lX"),
+                        ("THROTTLE", "external addon device, or per pedal firmware"),
+                        ("BRAKE",    "external addon device, or per pedal firmware"),
+                        ("CLUTCH",   "external addon device, or per pedal firmware"),
+                    },
+                    DirectDrive: true,
+                    Caveat: "DD-class. FFB uses the safer 0.50 friction-scale profile to avoid the " +
+                            "stiction issues older Logitech profiles caused on G PRO / RS50.");
+            }
         }
 
-        // ── Thrustmaster ──────────────────────────────────────────
+        // ── Thrustmaster (VID 0x044F) ─────────────────────────────
         if (vid == 0x044F)
         {
-            // T300RS B66E, T300 Ferrari, TX, TS-XW, T128, T248, etc.
             bool isT300 = pid is 0xB66D or 0xB66E or 0xB66F or 0xB677 or 0xB67A;
             bool isTx   = pid == 0xB664;
             bool isTsxw = pid == 0xB66F;
-            if (isT300 || isTx || isTsxw)
+            bool isTGT  = pid == 0xB684;
+            if (isT300 || isTx || isTsxw || isTGT)
             {
                 return new FlatOutRule(
                     Name: $"Thrustmaster T-series (PID 0x{pid:X4})",
@@ -282,13 +360,13 @@ public static class MappingAnalysis
                         ("BRAKE",    "lY  — released-high, inverted"),
                         ("CLUTCH",   "slider[0] — released-high, inverted"),
                     },
-                    DirectDrive: false,
+                    DirectDrive: isTGT,
                     Caveat: "TX/TSXW gear paddles are buttons 4/5 by default. Hub firmware mode " +
                             "(Normal vs Compatibility) changes axis claim order on some PIDs.");
             }
         }
 
-        // ── Fanatec ──────────────────────────────────────────────
+        // ── Fanatec (VID 0x0EB7) ──────────────────────────────────
         if (vid == 0x0EB7)
         {
             return new FlatOutRule(
@@ -307,11 +385,13 @@ public static class MappingAnalysis
                         "Hub firmware Normal vs Compatibility mode affects PID + duplicate endpoint behavior.");
         }
 
-        // ── MOZA ────────────────────────────────────────────────
-        if (vid == 0x16D0 || name.Contains("moza"))
+        // ── MOZA (VID 0x346E, NOT 0x16D0) ─────────────────────────
+        // The previous tool revision had MOZA on 0x16D0 (Mosart Semiconductor),
+        // which is actually Simucube / OpenFFBoard's reseller VID.
+        if (vid == 0x346E || name.Contains("moza"))
         {
             return new FlatOutRule(
-                Name: $"MOZA R-series wheelbase",
+                Name: "MOZA R-series wheelbase (VID 0x346E)",
                 SlotRouting: "WHEEL slot 1; SR-P pedals route to ADDON slot if separately enumerated",
                 AxisMap: new()
                 {
@@ -321,11 +401,45 @@ public static class MappingAnalysis
                     ("CLUTCH",   "slider[0] or addon-device axis"),
                 },
                 DirectDrive: true,
-                Caveat: "Multi-function stalk enumerates as a separate JOYSTICK device; classifier " +
-                        "rule prevents the engine from treating it as a wheel.");
+                Caveat: "Multi-function stalk enumerates as a separate JOYSTICK device; the engine's " +
+                        "classifier rule prevents it from being treated as a wheel.");
         }
 
-        // ── PXN ─────────────────────────────────────────────────
+        // ── Simucube / DIY DD (VID 0x16D0 — Mosart) ───────────────
+        if (vid == 0x16D0 || name.Contains("simucube") || name.Contains("osw"))
+        {
+            return new FlatOutRule(
+                Name: "Simucube / OSW DIY DD",
+                SlotRouting: "WHEEL slot 1 (DD-friendly); separate pedal/shifter devices route to addon slots",
+                AxisMap: new()
+                {
+                    ("STEER",    "lX"),
+                    ("THROTTLE", "external pedal device"),
+                    ("BRAKE",    "external pedal device"),
+                    ("CLUTCH",   "external pedal device"),
+                },
+                DirectDrive: true,
+                Caveat: "FFB strength scales to 0.50 friction-coefficient on DD bases to prevent stiction.");
+        }
+
+        // ── Simagic ───────────────────────────────────────────────
+        if (name.Contains("simagic"))
+        {
+            return new FlatOutRule(
+                Name: "Simagic Alpha series",
+                SlotRouting: "WHEEL slot 1 (DD-friendly); P1000 pedals on a separate device",
+                AxisMap: new()
+                {
+                    ("STEER",    "lX"),
+                    ("THROTTLE", "external pedal device"),
+                    ("BRAKE",    "external pedal device"),
+                    ("CLUTCH",   "external pedal device"),
+                },
+                DirectDrive: true,
+                Caveat: null);
+        }
+
+        // ── PXN (VID 0x11FF) ──────────────────────────────────────
         if (vid == 0x11FF || name.Contains("pxn"))
         {
             return new FlatOutRule(

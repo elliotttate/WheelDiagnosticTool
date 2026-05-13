@@ -144,7 +144,10 @@ public static class ReportWriter
         sb.AppendLine("HID usage → DirectInput field → inferred action");
         sb.AppendLine("-----------------------------------------------");
         sb.AppendLine("Bridges the gap between 'the HID descriptor says this axis is Throttle' and");
-        sb.AppendLine("'the engine reads it as lRz'. Inferred-action column is from the captures above.");
+        sb.AppendLine("'the engine reads it as lRz'. The DI-field column comes from the DIJOYSTATE2");
+        sb.AppendLine("byte offset of the axis, NOT the HID descriptor name (those can disagree —");
+        sb.AppendLine("e.g. Logitech wheels often label an axis 'Y-Axis' that lands on the lRz offset).");
+        sb.AppendLine("The inferred-action column is from the user's PEDAL_/STEER_ captures.");
         var dev = s.SelectedDevice;
         if (dev == null || dev.Axes.Count == 0)
         {
@@ -153,26 +156,30 @@ public static class ReportWriter
             return;
         }
         sb.AppendLine();
-        sb.AppendLine("  HID page:usage  HID meaning  ->  DI field      ->  inferred action");
+        sb.AppendLine("  HID page:usage  HID meaning  HID descriptor name        ->  DI offset (field)  ->  inferred action");
 
-        // Build a quick lookup from axis name -> inferred action for the selected device.
+        // Build a lookup from DI-axis-name (lX/lY/etc.) to inferred action
+        // for the selected device. The captures key on DI offset names, NOT
+        // HID descriptor names, so the match has to be on Axes[i].Name —
+        // which after the v0.1.3 fix is also DI-offset-derived.
         var axisToAction = new System.Collections.Generic.Dictionary<string, (string action, CaptureConfidence conf)>();
         foreach (var m in s.InferredMapping)
         {
             if (m.SourceDeviceProductGuid != dev.ProductGuidData1) continue;
-            // The detail string starts with the axis name, e.g. "lY (range ...)" — pick the first token.
             var token = (m.Detail ?? "").Split(' ', 2)[0];
             if (!string.IsNullOrEmpty(token)) axisToAction[token] = (m.Action, m.Confidence);
         }
 
-        foreach (var a in dev.Axes)
+        foreach (var a in dev.Axes.OrderBy(a => a.DIByteOffset < 0 ? int.MaxValue : a.DIByteOffset))
         {
             string hid = a.HasUsage ? $"0x{a.UsagePage:X2}:0x{a.Usage:X2}" : "    -";
             string meaning = string.IsNullOrEmpty(a.UsageMeaning) ? "?" : a.UsageMeaning;
+            string hidName = string.IsNullOrEmpty(a.HidName) ? "(no name)" : a.HidName;
+            string diField = a.DIByteOffset >= 0 ? $"+{a.DIByteOffset,2} ({a.Name})" : a.Name;
             string action = "(no capture matched this axis)";
             if (axisToAction.TryGetValue(a.Name, out var entry))
                 action = $"{entry.action} (conf={entry.conf})";
-            sb.AppendLine($"  {hid,-14}  {meaning,-11}  ->  {a.Name,-10}  ->  {action}");
+            sb.AppendLine($"  {hid,-14}  {meaning,-11}  {Trim(hidName, 26),-26}  ->  {diField,-18}  ->  {action}");
         }
         sb.AppendLine();
     }
@@ -239,11 +246,12 @@ public static class ReportWriter
             sb.AppendLine($"       axes/btns/povs  = {d.AxisCount} / {d.ButtonCount} / {d.PovCount}");
             if (d.Axes.Count > 0)
             {
-                sb.AppendLine("       axis name        HID page:usage  meaning      min       max       FFB");
-                foreach (var a in d.Axes)
+                sb.AppendLine("       DI field    DI offset  HID page:usage  HID meaning   HID name                   min       max       FFB");
+                foreach (var a in d.Axes.OrderBy(a => a.DIByteOffset < 0 ? int.MaxValue : a.DIByteOffset))
                 {
                     var hidStr = a.HasUsage ? $"0x{a.UsagePage:X2}:0x{a.Usage:X2}" : "    -";
-                    sb.AppendLine($"         {a.Name,-14}  {hidStr,-14}  {a.UsageMeaning,-10}  {a.Min,8}  {a.Max,8}  {(a.HasForceFeedback ? "yes" : "")}");
+                    string ofs = a.DIByteOffset >= 0 ? $"+{a.DIByteOffset,2}" : "  ?";
+                    sb.AppendLine($"         {a.Name,-10}  {ofs,-7}  {hidStr,-14}  {a.UsageMeaning,-12}  {Trim(a.HidName, 24),-24}  {a.Min,8}  {a.Max,8}  {(a.HasForceFeedback ? "yes" : "")}");
                 }
             }
             sb.AppendLine();

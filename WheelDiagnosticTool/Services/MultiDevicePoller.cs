@@ -88,15 +88,29 @@ public sealed class MultiDevicePoller
             if (sliders != null && sliders.Length > 0) ObserveAxis(d, "slider[0]", sliders[0]);
             if (sliders != null && sliders.Length > 1) ObserveAxis(d, "slider[1]", sliders[1]);
 
-            // Buttons — emit press/release events with per-device tagging
+            // Buttons — emit press/release events with per-device tagging.
+            //
+            // During the baseline window we deliberately suppress event
+            // emission and just snapshot whatever the user is already
+            // holding. That eliminates a real failure mode reported in the
+            // wild: a tester left thumb on btn10 between steps, and the
+            // paddle-up step then showed btn10 as the "pressed button"
+            // instead of the actual paddle-up button. After baseline closes,
+            // _buttonPrevState matches the current state, so only NEW
+            // press/release transitions emit events.
             var btns = state.Buttons;
             if (btns != null)
             {
                 for (int i = 0; i < btns.Length; i++)
                 {
                     var key = (d.ProductGuidData1, i);
-                    bool was = _buttonPrevState.TryGetValue(key, out var w) && w;
                     bool now = btns[i];
+                    if (!_baselineCaptured)
+                    {
+                        _buttonPrevState[key] = now;
+                        continue;
+                    }
+                    bool was = _buttonPrevState.TryGetValue(key, out var w) && w;
                     if (now != was)
                     {
                         _events.Add(new ButtonEvent

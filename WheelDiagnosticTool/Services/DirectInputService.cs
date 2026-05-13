@@ -96,9 +96,30 @@ public sealed class DirectInputService : IDisposable
                     // we'll set a uniform range below.
                 }
 
+                // DIJOYSTATE2 byte offset → poller-axis-name. The poller
+                // samples state.X/Y/Z/Rx/Ry/Rz/Sliders directly, which
+                // correspond to fixed DIJOYSTATE2 offsets, NOT to whatever
+                // the HID descriptor calls the axis. Using the offset here
+                // keeps the HID-usage table's "DI field" column truthful.
+                int ofs = obj.Offset;
+                string diName = ofs switch
+                {
+                    0  => "lX",
+                    4  => "lY",
+                    8  => "lZ",
+                    12 => "lRx",
+                    16 => "lRy",
+                    20 => "lRz",
+                    24 => "slider[0]",
+                    28 => "slider[1]",
+                    _  => $"axis@{ofs}",
+                };
+
                 axes.Add(new AxisDescriptor
                 {
-                    Name = obj.Name ?? "(axis)",
+                    Name = diName,
+                    HidName = obj.Name ?? "",
+                    DIByteOffset = ofs,
                     Min = min,
                     Max = max,
                     HasUsage = obj.UsagePage != 0 || obj.Usage != 0,
@@ -223,6 +244,17 @@ public sealed class DirectInputService : IDisposable
             dev.Unacquire();
             dev.SetCooperativeLevel(windowHandle, CooperativeLevel.NonExclusive | CooperativeLevel.Background);
             var hr = dev.Acquire();
+            if (hr.Success)
+            {
+                // SetCooperativeLevel + re-Acquire silently resets the
+                // device-level Range property on some Windows DI implementations.
+                // Without this re-set, the idle-jitter capture ran right after
+                // navigation reads RAW axis values (e.g. Logitech pedals at +65535
+                // when released-high) while the guided baselines a few frames
+                // later see normalized -32768..32767 values. Re-apply the range
+                // every time we acquire so both pages agree.
+                try { dev.Properties.Range = new InputRange(-32768, 32767); } catch { /* ignore */ }
+            }
             return hr.Success;
         }
         catch { return false; }
