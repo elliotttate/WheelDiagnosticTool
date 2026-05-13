@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.exe
+*.pdb
+*.dll
+publish/
+TestResults/
+node_modules/
+*.binlog
+*.nupkg
+.idea/

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WheelDiagnosticTool.Views.WelcomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="40">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="8">
+            <TextBlock Text="Wheel Diagnostic Tool"
+                       FontSize="32" FontWeight="SemiBold"/>
+            <TextBlock TextWrapping="Wrap" FontSize="15" Opacity="0.85"
+                       Text="A guided walkthrough that captures everything about your steering wheel, pedals, shifter, and force-feedback hardware. The result is a single .txt file you can share with the FlatOut team to diagnose wheel issues without going back and forth."/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Spacing="16" Margin="0,24,0,0">
+            <TextBlock Text="What the tool will do" FontSize="18" FontWeight="SemiBold"/>
+            <StackPanel Spacing="8" Margin="12,0,0,0">
+                <TextBlock>1. Enumerate every game controller the system can see via DirectInput, XInput, and raw HID.</TextBlock>
+                <TextBlock>2. Scan for vendor software (G HUB, Pit House, MOZA, vJoy, etc.) that can hijack the wheel.</TextBlock>
+                <TextBlock>3. Walk you through a series of prompts: turn the wheel, press each pedal, shift through gears, identify buttons.</TextBlock>
+                <TextBlock>4. Probe force feedback by acquiring the device exclusively and asking which effects you can feel.</TextBlock>
+                <TextBlock>5. Write a long, paste-able report. Upload it to filebin.net and copy the URL to your clipboard.</TextBlock>
+            </StackPanel>
+            <TextBlock Margin="0,16,0,0" TextWrapping="Wrap" Opacity="0.75" FontSize="13"
+                       Text="The whole process takes 3–5 minutes. Every step has a Skip button — skip anything that does not apply to your hardware."/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,24,0,0">
+            <Button x:Name="StartButton" Style="{ThemeResource AccentButtonStyle}" Click="OnStartClicked">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Start"/>
+                    <FontIcon Glyph="&#xE0AB;" FontSize="14"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+    </Grid>
+</Page>

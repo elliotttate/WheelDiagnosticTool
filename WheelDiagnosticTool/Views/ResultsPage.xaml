@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WheelDiagnosticTool.Views.ResultsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="40">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="6">
+            <TextBlock x:Name="Title" Text="Generating report..." FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock x:Name="Subtitle" Opacity="0.85"
+                       Text="Writing the diagnostic file, then uploading to filebin.net."/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" Margin="0,20,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="14">
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Local file" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="LocalPathText" Text="(pending)" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="OpenFolderButton" Click="OnOpenFolder" IsEnabled="False">Open containing folder</Button>
+                            <Button x:Name="OpenFileButton" Click="OnOpenFile" IsEnabled="False">Open report in Notepad</Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Shareable link (filebin.net)" FontWeight="SemiBold"/>
+                        <TextBox x:Name="UrlBox" IsReadOnly="True" Text="" PlaceholderText="(uploading...)"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="CopyUrlButton" Click="OnCopyUrl" IsEnabled="False">Copy URL</Button>
+                            <Button x:Name="OpenUrlButton" Click="OnOpenUrl" IsEnabled="False">Open URL in browser</Button>
+                            <Button x:Name="RetryUploadButton" Click="OnRetryUpload" Visibility="Collapsed">Retry upload</Button>
+                        </StackPanel>
+                        <TextBlock x:Name="UploadError" Foreground="OrangeRed" TextWrapping="Wrap" Visibility="Collapsed"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Preview" FontWeight="SemiBold"/>
+                        <TextBox x:Name="PreviewBox"
+                                 IsReadOnly="True"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 Height="280"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="(report not yet generated)"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="StartOverButton" Click="OnStartOver">Run again</Button>
+            <Button x:Name="ExitButton" Click="OnExit" Style="{ThemeResource AccentButtonStyle}">Done</Button>
+        </StackPanel>
+    </Grid>
+</Page>

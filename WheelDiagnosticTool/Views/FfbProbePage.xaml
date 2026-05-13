@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WheelDiagnosticTool.Views.FfbProbePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="40">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="Force-feedback probe" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock Opacity="0.85" TextWrapping="Wrap"
+                       Text="This step tries to grab the wheel exclusively and play short test effects. The wheel will move — hold it gently or let it move freely. After each effect, tell us whether you felt it."/>
+        </StackPanel>
+
+        <InfoBar x:Name="WarnBar"
+                 Grid.Row="1"
+                 Margin="0,12,0,0"
+                 IsOpen="True"
+                 IsClosable="False"
+                 Severity="Warning"
+                 Title="Vendor software check"
+                 Message="If wheel-vendor software is running, it may already hold the exclusive lock and FFB tests will fail with HRESULT 0x800700AA. Consider closing it before clicking Start."/>
+
+        <ScrollViewer Grid.Row="2" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12">
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel Spacing="6">
+                        <TextBlock x:Name="AcquireStatus" Text="Status: not started" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="AutoCenterStatus" Text="" Opacity="0.85"/>
+                    </StackPanel>
+                </Border>
+
+                <ItemsControl x:Name="EffectRows"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="SkipButton" Click="OnSkip">Skip FFB</Button>
+            <Button x:Name="StartButton" Click="OnStart" Style="{ThemeResource AccentButtonStyle}">Start FFB probe</Button>
+            <Button x:Name="DoneButton" Click="OnDone" IsEnabled="False">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Continue"/>
+                    <FontIcon Glyph="&#xE0AB;" FontSize="14"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+    </Grid>
+</Page>

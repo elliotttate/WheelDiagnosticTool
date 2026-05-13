@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="WheelDiagnosticTool.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Wheel Diagnostic Tool">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Background="{ThemeResource SystemControlBackgroundAccentBrush}" Padding="20,12">
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE7FC;" FontSize="22" Foreground="White"/>
+                <TextBlock x:Name="HeaderText"
+                           Text="Wheel Diagnostic Tool"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Foreground="White"
+                           VerticalAlignment="Center"/>
+                <TextBlock x:Name="StepText"
+                           Text=""
+                           FontSize="14"
+                           Opacity="0.8"
+                           Foreground="White"
+                           VerticalAlignment="Center"
+                           Margin="20,0,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <Frame x:Name="RootFrame" Grid.Row="1" />
+
+        <Grid Grid.Row="2" Background="{ThemeResource LayerOnAcrylicFillColorDefaultBrush}" Padding="16,10">
+            <TextBlock x:Name="StatusText"
+                       Text="Ready"
+                       FontSize="12"
+                       Opacity="0.7"
+                       VerticalAlignment="Center"/>
+        </Grid>
+    </Grid>
+</Window>
