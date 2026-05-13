@@ -71,6 +71,9 @@ public sealed partial class EnumerationPage : Page
 
             foreach (var p in VendorSoftwareScanner.Scan())
                 session.VendorProcesses.Add(p);
+
+            foreach (var v in VirtualLayerScanner.Scan())
+                session.VirtualLayers.Add(v);
         });
 
         Render();

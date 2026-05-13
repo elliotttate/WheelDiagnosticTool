@@ -43,4 +43,6 @@ public sealed partial class MainWindow : Window
     {
         StatusText.Text = text;
     }
+
+    public string GetStatus() => StatusText.Text;
 }

@@ -5,9 +5,9 @@ using WheelDiagnosticTool.Views;
 namespace WheelDiagnosticTool.Services;
 
 /// <summary>
-/// The fixed wizard sequence. Each entry is the Page type to navigate to and
-/// a human-readable label that goes in the header so users can see "Step 4 of
-/// 13" while they work.
+/// The fixed wizard sequence. Each entry is the Page type to navigate to
+/// and a human-readable label that goes in the header so users can see
+/// "Step 4 of 30" while they work.
 ///
 /// Capture-step pages share a Page type (CaptureStepPage) and read their
 /// prompt from the StepId in the navigation parameter.
@@ -22,6 +22,9 @@ public static class WizardFlow
         new(typeof(EnumerationPage),     "Detecting hardware"),
         new(typeof(DeviceSelectionPage), "Pick device"),
 
+        // Idle jitter (hands-off baseline)
+        new(typeof(IdleJitterPage),  "Idle jitter capture"),
+
         // Steering
         new(typeof(CaptureStepPage), "Center the wheel",              "STEER_CENTER"),
         new(typeof(CaptureStepPage), "Turn wheel fully LEFT",         "STEER_LEFT"),
@@ -33,11 +36,17 @@ public static class WizardFlow
         new(typeof(CaptureStepPage), "Press CLUTCH fully, release (skip if no clutch)", "PEDAL_CLUTCH"),
         new(typeof(CaptureStepPage), "Pull HANDBRAKE fully, release (skip if none)",    "PEDAL_HANDBRAKE"),
 
+        // Pedal crosstalk — done after each pedal is identified individually
+        new(typeof(CaptureStepPage), "Press THROTTLE and BRAKE TOGETHER (then release)", "CROSSTALK_T_AND_B"),
+        new(typeof(CaptureStepPage), "Press BRAKE HARD (do not touch throttle or clutch)", "CROSSTALK_BRAKE_ONLY"),
+        new(typeof(CaptureStepPage), "Press THROTTLE HARD (do not touch brake or clutch)", "CROSSTALK_THROTTLE_ONLY"),
+        new(typeof(CaptureStepPage), "Press CLUTCH while pressing THROTTLE (skip if no clutch)", "CROSSTALK_CLUTCH_AND_THROTTLE"),
+
         // Shifter / paddles
         new(typeof(CaptureStepPage), "Press UPSHIFT paddle / button",   "PADDLE_UP"),
         new(typeof(CaptureStepPage), "Press DOWNSHIFT paddle / button", "PADDLE_DOWN"),
 
-        // Each H-shifter gear individually; user skips if they don't have one
+        // Each H-shifter gear individually
         new(typeof(CaptureStepPage), "Shift to gear 1 (skip if no H-shifter)", "GEAR_1"),
         new(typeof(CaptureStepPage), "Shift to gear 2",                         "GEAR_2"),
         new(typeof(CaptureStepPage), "Shift to gear 3",                         "GEAR_3"),

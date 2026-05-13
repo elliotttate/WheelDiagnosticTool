@@ -82,17 +82,27 @@ public sealed partial class DeviceSelectionPage : Page
         var idx = DeviceList.SelectedIndex;
         if (idx < 0 || idx >= _devices.Count) return;
         var chosen = _devices[idx];
-        DiagnosticSession.Instance.SelectedDevice = chosen;
+        var session = DiagnosticSession.Instance;
+        session.SelectedDevice = chosen;
 
-        // Acquire the chosen device for polling now so subsequent capture pages
-        // can read state without re-acquiring each time.
-        if (!Guid.TryParse(chosen.InstanceGuid, out var guid))
+        // Build the polled-device list: the chosen wheel plus every other DI
+        // device whose VID is in our wheel-vendor list. That picks up separate
+        // pedal addons and shifters automatically (Fanatec ClubSport pedals,
+        // Logitech driving force shifter, MOZA SR-P, etc.).
+        session.PolledDevices.Clear();
+        session.PolledDevices.Add(chosen);
+        foreach (var d in session.DirectInputDevices)
         {
-            // shouldn't happen, but skip acquisition rather than blocking the wizard
+            if (d.InstanceGuid == chosen.InstanceGuid) continue;
+            if (string.IsNullOrEmpty(d.VendorLabel)) continue; // skip unknown-vendor pads/joysticks
+            session.PolledDevices.Add(d);
         }
-        else
+
+        // Acquire every polled device for read-only polling.
+        foreach (var d in session.PolledDevices)
         {
-            AppServices.DirectInput.AcquireForPolling(guid, AppServices.MainWindowHandle);
+            if (Guid.TryParse(d.InstanceGuid, out var g))
+                AppServices.DirectInput.AcquireForPolling(g, AppServices.MainWindowHandle);
         }
 
         var next = WizardFlow.Next(typeof(DeviceSelectionPage), null);

@@ -37,15 +37,22 @@
             <ItemsControl x:Name="AxisList"/>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button x:Name="ResetButton" Click="OnReset">Reset baseline</Button>
-            <Button x:Name="SkipButton" Click="OnSkip">Skip this step</Button>
-            <Button x:Name="NextButton" Style="{ThemeResource AccentButtonStyle}" Click="OnNext">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <TextBlock Text="Next"/>
-                    <FontIcon Glyph="&#xE0AB;" FontSize="14"/>
-                </StackPanel>
-            </Button>
+        <StackPanel Grid.Row="3" Orientation="Vertical" Spacing="8" Margin="0,16,0,0">
+            <InfoBar x:Name="ConfirmBar"
+                     IsOpen="False"
+                     IsClosable="True"
+                     Severity="Warning"
+                     Title="This step may not have captured what we expected"/>
+            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+                <Button x:Name="ResetButton" Click="OnReset">Reset baseline</Button>
+                <Button x:Name="SkipButton" Click="OnSkip">Skip this step</Button>
+                <Button x:Name="NextButton" Style="{ThemeResource AccentButtonStyle}" Click="OnNext">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Next"/>
+                        <FontIcon Glyph="&#xE0AB;" FontSize="14"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </StackPanel>
     </Grid>
 </Page>

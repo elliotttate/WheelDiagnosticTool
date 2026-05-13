@@ -20,9 +20,13 @@ public static class HidEnumerationService
         {
             ushort vid;
             ushort pid;
+            ushort releaseNumber = 0;
             ushort usagePage = 0;
             ushort usage = 0;
             string friendly = "";
+            string manufacturer = "";
+            string product = "";
+            string serial = "";
 
             try
             {
@@ -40,7 +44,11 @@ public static class HidEnumerationService
             var vendorLabel = VendorLookup.Lookup(vid);
             if (vendorLabel == null) continue;
 
+            try { releaseNumber = (ushort)dev.ReleaseNumberBcd; } catch { }
             try { friendly = dev.GetFriendlyName() ?? dev.GetProductName() ?? ""; } catch { }
+            try { manufacturer = dev.GetManufacturer() ?? ""; } catch { }
+            try { product = dev.GetProductName() ?? ""; } catch { }
+            try { serial = dev.GetSerialNumber() ?? ""; } catch { }
 
             try
             {
@@ -66,8 +74,12 @@ public static class HidEnumerationService
             {
                 DevicePath = dev.DevicePath ?? "",
                 FriendlyName = friendly,
+                ManufacturerString = manufacturer,
+                ProductString = product,
+                SerialNumberString = serial,
                 VendorId = vid,
                 ProductId = pid,
+                ReleaseNumber = releaseNumber,
                 UsagePage = usagePage,
                 Usage = usage,
                 VendorLabel = vendorLabel,

@@ -1,21 +1,34 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using WheelDiagnosticTool.Models;
 
 namespace WheelDiagnosticTool.Services;
 
 /// <summary>
-/// Turns the captured DiagnosticSession into the final .txt that ships off
-/// to filebin / Sentry. Layout deliberately echoes the in-game
-/// WheelDiagnostics.txt format (FODeviceFilteringManager.cpp:2462) so a
-/// triager skimming both files reads them the same way.
+/// Turns the captured DiagnosticSession into the final .txt that ships
+/// to filebin / Sentry. Section ordering is deliberate:
+///
+///   1. Inferred mapping summary  ← the triager reads this first
+///   2. FlatOut runtime prediction (does the engine agree?)
+///   3. HID-usage → DI-field map  (the "what is the throttle, really?" table)
+///   4. System / vendor software / virtual layers
+///   5. DirectInput / HID / XInput enumeration
+///   6. Selected device
+///   7. Idle jitter
+///   8. Per-step capture details (with button events + crosstalk bleed)
+///   9. Button identifications
+///  10. FFB probe results
 /// </summary>
 public static class ReportWriter
 {
     public static string WriteToFile(DiagnosticSession s, string? overridePath = null)
     {
-        var sb = new StringBuilder(64 * 1024);
+        // Run the analysis layer first so the summary at the top is populated.
+        MappingAnalysis.Run(s);
+
+        var sb = new StringBuilder(128 * 1024);
         WriteTo(s, sb);
         var path = overridePath ?? BuildDefaultPath(s);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -42,9 +55,14 @@ public static class ReportWriter
         sb.AppendLine("Wheel Diagnostic Tool report");
         sb.AppendLine(hr);
         sb.AppendLine($"  tool version          = {s.ToolVersion}");
+        sb.AppendLine($"  schema version        = {s.SchemaVersion}");
         sb.AppendLine($"  captured (UTC)        = {s.StartedUtc:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine($"  captured (local)      = {s.StartedUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss zzz}");
         sb.AppendLine();
+
+        WriteInferredMapping(s, sb);
+        WriteFlatOutPrediction(s, sb);
+        WriteHidToDiMap(s, sb);
 
         sb.AppendLine("System");
         sb.AppendLine("------");
@@ -58,10 +76,12 @@ public static class ReportWriter
         sb.AppendLine();
 
         WriteVendorProcesses(s, sb);
+        WriteVirtualLayers(s, sb);
         WriteDirectInputDevices(s, sb);
         WriteHidDevices(s, sb);
         WriteXInputSlots(s, sb);
         WriteSelectedDevice(s, sb);
+        WriteIdleJitter(s, sb);
         WriteCaptures(s, sb);
         WriteButtonIdentifications(s, sb);
         WriteFfbProbe(s, sb);
@@ -70,6 +90,91 @@ public static class ReportWriter
         sb.AppendLine(hr);
         sb.AppendLine("End of report");
         sb.AppendLine(hr);
+    }
+
+    private static void WriteInferredMapping(DiagnosticSession s, StringBuilder sb)
+    {
+        sb.AppendLine("Inferred mapping (what the captures say the user's hardware is doing)");
+        sb.AppendLine("---------------------------------------------------------------------");
+        if (s.InferredMapping.Count == 0)
+        {
+            sb.AppendLine("  (no captures yet — wizard not completed)");
+            sb.AppendLine();
+            return;
+        }
+        foreach (var m in s.InferredMapping)
+        {
+            string conf = m.Confidence switch
+            {
+                CaptureConfidence.High         => "high  ",
+                CaptureConfidence.Low          => "low   ",
+                CaptureConfidence.Missed       => "MISSED",
+                CaptureConfidence.Ambiguous    => "AMBIG ",
+                CaptureConfidence.NotApplicable => "n/a   ",
+                _ => "?     "
+            };
+            string src = string.IsNullOrEmpty(m.SourceDeviceName) ? "" : $" @ {m.SourceDeviceName}";
+            sb.AppendLine($"  [{conf}] {m.Action,-12} = {m.Detail}{src}");
+            if (!string.IsNullOrEmpty(m.Note))
+                sb.AppendLine($"             {m.Note}");
+        }
+        sb.AppendLine();
+    }
+
+    private static void WriteFlatOutPrediction(DiagnosticSession s, StringBuilder sb)
+    {
+        sb.AppendLine("FlatOut/PlayAll engine prediction");
+        sb.AppendLine("---------------------------------");
+        sb.AppendLine("What the in-game wheel system would do for this device based on known-device");
+        sb.AppendLine("rules. Compare against 'Inferred mapping' above — disagreements between the");
+        sb.AppendLine("two are the fast path for spotting game-vs-hardware misroute bugs.");
+        if (s.FlatOutPredictionLines.Count == 0)
+        {
+            sb.AppendLine("  (no prediction available)");
+        }
+        else
+        {
+            foreach (var line in s.FlatOutPredictionLines) sb.AppendLine(line);
+        }
+        sb.AppendLine();
+    }
+
+    private static void WriteHidToDiMap(DiagnosticSession s, StringBuilder sb)
+    {
+        sb.AppendLine("HID usage → DirectInput field → inferred action");
+        sb.AppendLine("-----------------------------------------------");
+        sb.AppendLine("Bridges the gap between 'the HID descriptor says this axis is Throttle' and");
+        sb.AppendLine("'the engine reads it as lRz'. Inferred-action column is from the captures above.");
+        var dev = s.SelectedDevice;
+        if (dev == null || dev.Axes.Count == 0)
+        {
+            sb.AppendLine("  (no device selected, or device exposes no axes)");
+            sb.AppendLine();
+            return;
+        }
+        sb.AppendLine();
+        sb.AppendLine("  HID page:usage  HID meaning  ->  DI field      ->  inferred action");
+
+        // Build a quick lookup from axis name -> inferred action for the selected device.
+        var axisToAction = new System.Collections.Generic.Dictionary<string, (string action, CaptureConfidence conf)>();
+        foreach (var m in s.InferredMapping)
+        {
+            if (m.SourceDeviceProductGuid != dev.ProductGuidData1) continue;
+            // The detail string starts with the axis name, e.g. "lY (range ...)" — pick the first token.
+            var token = (m.Detail ?? "").Split(' ', 2)[0];
+            if (!string.IsNullOrEmpty(token)) axisToAction[token] = (m.Action, m.Confidence);
+        }
+
+        foreach (var a in dev.Axes)
+        {
+            string hid = a.HasUsage ? $"0x{a.UsagePage:X2}:0x{a.Usage:X2}" : "    -";
+            string meaning = string.IsNullOrEmpty(a.UsageMeaning) ? "?" : a.UsageMeaning;
+            string action = "(no capture matched this axis)";
+            if (axisToAction.TryGetValue(a.Name, out var entry))
+                action = $"{entry.action} (conf={entry.conf})";
+            sb.AppendLine($"  {hid,-14}  {meaning,-11}  ->  {a.Name,-10}  ->  {action}");
+        }
+        sb.AppendLine();
     }
 
     private static void WriteVendorProcesses(DiagnosticSession s, StringBuilder sb)
@@ -87,6 +192,25 @@ public static class ReportWriter
             {
                 sb.AppendLine($"  pid={p.Pid,-6} {p.Vendor,-14} {p.ProcessName,-30} {p.Description}");
             }
+        }
+        sb.AppendLine();
+    }
+
+    private static void WriteVirtualLayers(DiagnosticSession s, StringBuilder sb)
+    {
+        sb.AppendLine("Virtual / hiding layers (HidHide, ViGEm, vJoy, Interception)");
+        sb.AppendLine("--------------------------------------------------------------");
+        sb.AppendLine("When a HID device is visible to Windows but missing from DirectInput, the");
+        sb.AppendLine("most common cause is one of these layers filtering or virtualizing it.");
+        if (s.VirtualLayers.Count == 0)
+        {
+            sb.AppendLine("  (no known virtualization/hiding layers detected)");
+            sb.AppendLine();
+            return;
+        }
+        foreach (var v in s.VirtualLayers)
+        {
+            sb.AppendLine($"  {v.Name,-14} {v.Kind,-14} running={(v.IsRunning ? "YES" : "no ")}  {v.Detail}");
         }
         sb.AppendLine();
     }
@@ -118,8 +242,8 @@ public static class ReportWriter
                 sb.AppendLine("       axis name        HID page:usage  meaning      min       max       FFB");
                 foreach (var a in d.Axes)
                 {
-                    var hid = a.HasUsage ? $"0x{a.UsagePage:X2}:0x{a.Usage:X2}" : "    -";
-                    sb.AppendLine($"         {a.Name,-14}  {hid,-14}  {a.UsageMeaning,-10}  {a.Min,8}  {a.Max,8}  {(a.HasForceFeedback ? "yes" : "")}");
+                    var hidStr = a.HasUsage ? $"0x{a.UsagePage:X2}:0x{a.Usage:X2}" : "    -";
+                    sb.AppendLine($"         {a.Name,-14}  {hidStr,-14}  {a.UsageMeaning,-10}  {a.Min,8}  {a.Max,8}  {(a.HasForceFeedback ? "yes" : "")}");
                 }
             }
             sb.AppendLine();
@@ -131,8 +255,7 @@ public static class ReportWriter
         sb.AppendLine($"Windows HID-level enumeration (vendor-filtered to wheel/pedal/shifter VIDs; {s.HidDevices.Count} total)");
         sb.AppendLine("---------------------------------------------------------------------");
         sb.AppendLine("Devices listed here that are NOT in the DirectInput list above are being");
-        sb.AppendLine("hidden by G HUB / vJoy / Steam Input. That virtualization is usually the");
-        sb.AppendLine("reason wheels/shifters don't show up in DInput.");
+        sb.AppendLine("hidden — usually by HidHide / vJoy / Steam Input / G HUB.");
         sb.AppendLine();
         if (s.HidDevices.Count == 0)
         {
@@ -142,10 +265,13 @@ public static class ReportWriter
         }
         foreach (var h in s.HidDevices)
         {
-            sb.AppendLine($"  VID/PID 0x{h.VendorId:X4}/0x{h.ProductId:X4} ({h.VendorLabel})  usage=0x{h.UsagePage:X2}:0x{h.Usage:X2}");
-            sb.AppendLine($"    name = {h.FriendlyName}");
-            sb.AppendLine($"    path = {h.DevicePath}");
-            sb.AppendLine($"    seen in DirectInput list above = {(h.MatchesInDirectInput ? "YES" : "NO  ← hidden from DI")}");
+            sb.AppendLine($"  VID/PID 0x{h.VendorId:X4}/0x{h.ProductId:X4} rev=0x{h.ReleaseNumber:X4} ({h.VendorLabel})  usage=0x{h.UsagePage:X2}:0x{h.Usage:X2}");
+            sb.AppendLine($"    name         = {h.FriendlyName}");
+            if (!string.IsNullOrEmpty(h.ManufacturerString)) sb.AppendLine($"    manufacturer = {h.ManufacturerString}");
+            if (!string.IsNullOrEmpty(h.ProductString))      sb.AppendLine($"    product      = {h.ProductString}");
+            if (!string.IsNullOrEmpty(h.SerialNumberString)) sb.AppendLine($"    serial       = {h.SerialNumberString}");
+            sb.AppendLine($"    path         = {h.DevicePath}");
+            sb.AppendLine($"    visible in DI list above = {(h.MatchesInDirectInput ? "YES" : "NO  ← hidden from DI")}");
         }
         sb.AppendLine();
     }
@@ -186,6 +312,32 @@ public static class ReportWriter
         sb.AppendLine($"  productGuidData1  = 0x{s.SelectedDevice.ProductGuidData1:X8}");
         sb.AppendLine($"  axes/btns/povs    = {s.SelectedDevice.AxisCount} / {s.SelectedDevice.ButtonCount} / {s.SelectedDevice.PovCount}");
         sb.AppendLine($"  FFB capable       = {(s.SelectedDevice.HasFfb ? "YES" : "no")}");
+
+        if (s.PolledDevices.Count > 1)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"  Multi-device polling — captures listened to {s.PolledDevices.Count} devices simultaneously:");
+            foreach (var d in s.PolledDevices)
+                sb.AppendLine($"    - \"{d.ProductName}\"  VID=0x{d.VendorId:X4} PID=0x{d.ProductId:X4} ({d.VendorLabel})");
+        }
+        sb.AppendLine();
+    }
+
+    private static void WriteIdleJitter(DiagnosticSession s, StringBuilder sb)
+    {
+        sb.AppendLine("Idle jitter (8-second hands-off capture)");
+        sb.AppendLine("----------------------------------------");
+        if (s.IdleJitter.Count == 0)
+        {
+            sb.AppendLine("  (skipped or not captured)");
+            sb.AppendLine();
+            return;
+        }
+        sb.AppendLine("  device                          axis        mean       min       max     range    stddev   verdict");
+        foreach (var r in s.IdleJitter.OrderByDescending(r => r.Max - r.Min))
+        {
+            sb.AppendLine($"  {Trim(r.DeviceProductName, 30),-30}  {r.AxisName,-10}  {r.Mean,7}  {r.Min,8}  {r.Max,8}  {(r.Max - r.Min),6}  {r.StandardDeviation,8:0.0}   {r.Verdict}");
+        }
         sb.AppendLine();
     }
 
@@ -211,28 +363,66 @@ public static class ReportWriter
                 continue;
             }
 
-            sb.AppendLine($"    dominant axis  : {(string.IsNullOrEmpty(step.DominantAxisName) ? "(none detected)" : step.DominantAxisName)}");
-            sb.AppendLine($"    baseline       : {step.DominantBaseline}");
-            sb.AppendLine($"    observed range : {step.DominantMin} .. {step.DominantMax}  (travel = {step.DominantMax - step.DominantMin})");
-            sb.AppendLine($"    press direction: {step.DominantPressDirection}  ({(step.DominantPressDirection > 0 ? "axis increases when pressed" : step.DominantPressDirection < 0 ? "axis decreases when pressed" : "no net motion")})");
+            string conf = step.Confidence switch
+            {
+                CaptureConfidence.High         => "high",
+                CaptureConfidence.Low          => "low",
+                CaptureConfidence.Missed       => "MISSED",
+                CaptureConfidence.Ambiguous    => "AMBIGUOUS",
+                CaptureConfidence.NotApplicable => "n/a",
+                _ => "?"
+            };
+            sb.AppendLine($"    confidence     : {conf}  ({step.ConfidenceReason ?? ""})");
+            if (string.IsNullOrEmpty(step.DominantAxisName))
+            {
+                sb.AppendLine("    dominant axis  : (none detected — no axis moved enough)");
+            }
+            else
+            {
+                sb.AppendLine($"    dominant axis  : {step.DominantDeviceProductName}::{step.DominantAxisName}");
+                sb.AppendLine($"    baseline       : {step.DominantBaseline}");
+                sb.AppendLine($"    observed range : {step.DominantMin} .. {step.DominantMax}  (travel = {step.DominantMax - step.DominantMin})");
+                sb.AppendLine($"    press direction: {step.DominantPressDirection}  ({(step.DominantPressDirection > 0 ? "axis increases when pressed" : step.DominantPressDirection < 0 ? "axis decreases when pressed" : "no net motion")})");
+            }
 
             if (step.Axes.Count > 0)
             {
-                sb.AppendLine("    all axis observations during this step:");
-                sb.AppendLine("      axis        baseline    min       max    range  motion?  maxDelta");
-                foreach (var a in step.Axes)
+                sb.AppendLine("    every axis observed during this step:");
+                sb.AppendLine("      device                          axis      baseline    min       max    range  motion?  maxDelta");
+                foreach (var a in step.Axes.OrderByDescending(a => a.MaxDeltaFromBaseline))
                 {
-                    sb.AppendLine($"      {a.AxisName,-10}  {a.Baseline,8}  {(a.MinObserved == int.MaxValue ? 0 : a.MinObserved),8}  {(a.MaxObserved == int.MinValue ? 0 : a.MaxObserved),8}  {a.Range,6}   {(a.SeenMotion ? "yes" : "no "),-3}    {a.MaxDeltaFromBaseline}");
+                    sb.AppendLine($"      {Trim(a.DeviceProductName, 30),-30}  {a.AxisName,-8}  {a.Baseline,8}  {(a.MinObserved == int.MaxValue ? 0 : a.MinObserved),8}  {(a.MaxObserved == int.MinValue ? 0 : a.MaxObserved),8}  {a.Range,6}   {(a.SeenMotion ? "yes" : "no "),-3}    {a.MaxDeltaFromBaseline}");
                 }
             }
 
-            if (step.ButtonsPressed.Count > 0)
-                sb.AppendLine($"    buttons that fired during this step: {string.Join(", ", step.ButtonsPressed)}");
+            // Per-event button trail — order matters for paddle/gear steps.
+            if (step.ButtonEvents.Count > 0)
+            {
+                sb.AppendLine("    button events (in order, press/release with timing):");
+                foreach (var ev in step.ButtonEvents)
+                {
+                    sb.AppendLine($"      t={ev.TimeOffsetSec:0.000}s  {(ev.Pressed ? "PRESS  " : "release")}  {Trim(ev.DeviceProductName, 30),-30}  btn {ev.ButtonIndex}");
+                }
+            }
+            else
+            {
+                sb.AppendLine("    button events  : (none)");
+            }
 
             if (step.PovValues.Count > 0)
             {
                 foreach (var kv in step.PovValues)
                     sb.AppendLine($"    POV {kv.Key} ended at value {kv.Value}");
+            }
+
+            if (step.CrosstalkBleed.Count > 0)
+            {
+                sb.AppendLine("    cross-axis bleed (other axes that moved while the actuated one was pressed):");
+                foreach (var a in step.CrosstalkBleed.OrderByDescending(a => a.MaxDeltaFromBaseline))
+                {
+                    double pct = 65535.0 < 1 ? 0 : (a.MaxDeltaFromBaseline * 100.0) / 65535.0;
+                    sb.AppendLine($"      {Trim(a.DeviceProductName, 30),-30}  {a.AxisName,-8}  bled {a.MaxDeltaFromBaseline} units (~{pct:0.0}% of full scale)");
+                }
             }
 
             if (!string.IsNullOrEmpty(step.UserNote))
@@ -254,7 +444,8 @@ public static class ReportWriter
         }
         foreach (var b in s.ButtonIdentifications)
         {
-            sb.AppendLine($"  {b.Label,-30} -> {(b.Skipped ? "SKIPPED" : "button " + b.ButtonIndex)}");
+            string detail = b.Skipped ? "SKIPPED" : $"button {b.ButtonIndex}@{b.DeviceProductName}";
+            sb.AppendLine($"  {b.Label,-30} -> {detail}");
         }
         sb.AppendLine();
     }
@@ -306,4 +497,6 @@ public static class ReportWriter
         }
         sb.AppendLine();
     }
+
+    private static string Trim(string s, int max) => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s.Substring(0, max - 1) + "…");
 }

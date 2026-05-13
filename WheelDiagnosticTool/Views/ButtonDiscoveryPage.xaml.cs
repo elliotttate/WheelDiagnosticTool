@@ -133,10 +133,13 @@ public sealed partial class ButtonDiscoveryPage : Page
     private void OnCaptureCurrent(object sender, RoutedEventArgs e)
     {
         if (_currentTargetIdx >= s_buttonTargets.Length || _lastPressedIndex < 0) return;
+        var dev = DiagnosticSession.Instance.SelectedDevice;
         DiagnosticSession.Instance.ButtonIdentifications.Add(new ButtonIdentification
         {
             Label = s_buttonTargets[_currentTargetIdx],
             ButtonIndex = _lastPressedIndex,
+            DeviceProductName = dev?.ProductName ?? "",
+            DeviceProductGuid = dev?.ProductGuidData1 ?? 0,
         });
         _currentTargetIdx++;
         UpdateTargetLabel();

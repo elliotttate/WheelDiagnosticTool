@@ -23,13 +23,17 @@ public sealed partial class ResultsPage : Page
             mw.SetStatus("Writing...");
         }
 
-        // Write the file off-thread to keep the UI responsive even for huge dumps.
-        string path = await Task.Run(() => ReportWriter.WriteToFile(DiagnosticSession.Instance));
-        LocalPathText.Text = path;
+        // Write both the .txt and the JSON sidecar off-thread so the UI stays responsive.
+        string path = await Task.Run(() =>
+        {
+            var p = ReportWriter.WriteToFile(DiagnosticSession.Instance);
+            JsonReportWriter.WriteToFile(DiagnosticSession.Instance, p);
+            return p;
+        });
+        LocalPathText.Text = $"{path}\n{DiagnosticSession.Instance.LocalJsonPath}";
         OpenFolderButton.IsEnabled = true;
         OpenFileButton.IsEnabled = true;
 
-        // Preview the head of the file.
         try
         {
             using var f = File.OpenRead(path);
@@ -55,26 +59,37 @@ public sealed partial class ResultsPage : Page
         CopyUrlButton.IsEnabled = false;
         OpenUrlButton.IsEnabled = false;
 
-        var result = await AppServices.Uploader.UploadAsync(path);
-        if (result.Ok && !string.IsNullOrEmpty(result.Url))
+        // Upload both files under the SAME random bin so they sit together.
+        var jsonPath = DiagnosticSession.Instance.LocalJsonPath;
+        var bin = FilebinUploader.GenerateBinName();
+
+        var txtResult = await AppServices.Uploader.UploadAsync(path, bin);
+        FilebinUploader.UploadResult? jsonResult = null;
+        if (!string.IsNullOrEmpty(jsonPath) && File.Exists(jsonPath))
+            jsonResult = await AppServices.Uploader.UploadAsync(jsonPath, bin);
+
+        if (txtResult.Ok && !string.IsNullOrEmpty(txtResult.Url))
         {
-            DiagnosticSession.Instance.FilebinUrl = result.Url;
-            UrlBox.Text = result.Url;
+            DiagnosticSession.Instance.FilebinUrl = txtResult.Url;
+            DiagnosticSession.Instance.FilebinJsonUrl = jsonResult?.Url;
+            UrlBox.Text = jsonResult?.Url is { Length: > 0 } j
+                ? $"{txtResult.Url}\n{j}"
+                : txtResult.Url;
             CopyUrlButton.IsEnabled = true;
             OpenUrlButton.IsEnabled = true;
-            ClipboardService.TrySetText(result.Url);
+            ClipboardService.TrySetText(UrlBox.Text);
             Title.Text = "Report ready ✓";
-            Subtitle.Text = "The shareable link has been copied to your clipboard.";
+            Subtitle.Text = "The shareable link(s) have been copied to your clipboard.";
             if (App.MainAppWindow is MainWindow mwOk) mwOk.SetStatus("Done — URL copied to clipboard");
         }
         else
         {
-            DiagnosticSession.Instance.FilebinError = result.Error;
-            UploadError.Text = $"Upload failed: {result.Error}\n\nYou can still share the local file or click Retry upload.";
+            DiagnosticSession.Instance.FilebinError = txtResult.Error;
+            UploadError.Text = $"Upload failed: {txtResult.Error}\n\nYou can still share the local file(s) or click Retry upload.";
             UploadError.Visibility = Visibility.Visible;
             RetryUploadButton.Visibility = Visibility.Visible;
             Title.Text = "Report ready (upload pending)";
-            Subtitle.Text = "The .txt was written locally; upload to filebin.net failed and can be retried.";
+            Subtitle.Text = "Reports were written locally; upload to filebin.net failed and can be retried.";
             if (App.MainAppWindow is MainWindow mwFail) mwFail.SetStatus("Upload failed");
         }
     }
@@ -97,7 +112,9 @@ public sealed partial class ResultsPage : Page
     private void OnOpenUrl(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(UrlBox.Text)) return;
-        try { Process.Start(new ProcessStartInfo(UrlBox.Text) { UseShellExecute = true }); } catch { }
+        // UrlBox may have two lines (txt + json) — open the first.
+        var first = UrlBox.Text.Split('\n')[0].Trim();
+        try { Process.Start(new ProcessStartInfo(first) { UseShellExecute = true }); } catch { }
     }
 
     private void OnOpenFile(object sender, RoutedEventArgs e)
@@ -120,15 +137,20 @@ public sealed partial class ResultsPage : Page
 
     private void OnStartOver(object sender, RoutedEventArgs e)
     {
-        // Reset session state and walk back to the welcome page.
         var s = DiagnosticSession.Instance;
         s.CaptureSteps.Clear();
         s.ButtonIdentifications.Clear();
         s.FfbProbe.Effects.Clear();
         s.FfbProbe.Skipped = false;
         s.SelectedDevice = null;
+        s.PolledDevices.Clear();
+        s.IdleJitter.Clear();
+        s.InferredMapping.Clear();
+        s.FlatOutPredictionLines.Clear();
         s.LocalReportPath = null;
+        s.LocalJsonPath = null;
         s.FilebinUrl = null;
+        s.FilebinJsonUrl = null;
         s.FilebinError = null;
         if (App.MainAppWindow is MainWindow mw) mw.NavigateTo(typeof(WelcomePage));
     }

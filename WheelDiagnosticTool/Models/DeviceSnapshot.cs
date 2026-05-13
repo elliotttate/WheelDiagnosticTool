@@ -61,8 +61,12 @@ public sealed class HidDeviceSnapshot
 {
     public string DevicePath { get; init; } = "";
     public string FriendlyName { get; init; } = "";
+    public string ManufacturerString { get; init; } = "";
+    public string ProductString { get; init; } = "";
+    public string SerialNumberString { get; init; } = "";
     public ushort VendorId { get; init; }
     public ushort ProductId { get; init; }
+    public ushort ReleaseNumber { get; init; } // firmware version reported by HID descriptor
     public ushort UsagePage { get; init; }
     public ushort Usage { get; init; }
     public string VendorLabel { get; init; } = "";
