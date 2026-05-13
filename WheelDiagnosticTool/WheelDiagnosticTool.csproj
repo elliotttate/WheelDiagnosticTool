@@ -19,6 +19,20 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
+  <!--
+    Release single-file publish config. dotnet publish -c Release will pack
+    everything (managed + native + WindowsAppSDK) into one .exe that
+    self-extracts to %TEMP%/.net/<id>/ on first run.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <SelfContained>true</SelfContained>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.*" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.*" />

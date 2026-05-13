@@ -1,6 +1,7 @@
 bin/
 obj/
 *.zip
+WheelDiagnosticTool-v*.exe
 .vs/
 *.user
 *.suo
