@@ -86,15 +86,15 @@ public sealed partial class DeviceSelectionPage : Page
         session.SelectedDevice = chosen;
 
         // Build the polled-device list: the chosen wheel plus every other DI
-        // device whose VID is in our wheel-vendor list. That picks up separate
-        // pedal addons and shifters automatically (Fanatec ClubSport pedals,
-        // Logitech driving force shifter, MOZA SR-P, etc.).
+        // device that is either from a known wheel/accessory VID or has an
+        // accessory-shaped name. The name fallback matters for devices whose
+        // VID has not been catalogued yet, such as standalone handbrakes.
         session.PolledDevices.Clear();
         session.PolledDevices.Add(chosen);
         foreach (var d in session.DirectInputDevices)
         {
             if (d.InstanceGuid == chosen.InstanceGuid) continue;
-            if (string.IsNullOrEmpty(d.VendorLabel)) continue; // skip unknown-vendor pads/joysticks
+            if (!ShouldPollWithWheel(d)) continue;
             session.PolledDevices.Add(d);
         }
 
@@ -107,5 +107,20 @@ public sealed partial class DeviceSelectionPage : Page
 
         var next = WizardFlow.Next(typeof(DeviceSelectionPage), null);
         if (next != null && App.MainAppWindow is MainWindow mw) mw.NavigateTo(next.PageType);
+    }
+
+    private static bool ShouldPollWithWheel(DiDeviceSnapshot d)
+    {
+        if (!string.IsNullOrWhiteSpace(d.VendorLabel))
+            return true;
+
+        string name = $"{d.ProductName} {d.Name}".ToLowerInvariant();
+        return name.Contains("pedal")
+            || name.Contains("shifter")
+            || name.Contains("handbrake")
+            || name.Contains("hbp")
+            || name.Contains("hgp")
+            || name.Contains("h-pattern")
+            || name.Contains("button box");
     }
 }

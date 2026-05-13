@@ -96,13 +96,39 @@ public static class MappingAnalysis
 
         if (releasedHigh) baseDetail += " — released-high / inverted (axis sits at max, drops when pressed)";
         else if (releasedLow) baseDetail += " — released-low / standard (axis sits at min, rises when pressed)";
-        else if (action == "STEER") baseDetail += $" — center-rest, dir {source.DominantPressDirection}";
+        else if (action == "STEER") baseDetail += DescribeSteeringDirection(s, source);
         else if (centeredIdle) baseDetail += " — center-rest pedal (Hall-effect or load cell zero-baseline)";
 
         entry.Detail = baseDetail;
         if (!string.IsNullOrEmpty(source.ConfidenceReason)) entry.Note = source.ConfidenceReason;
 
         s.InferredMapping.Add(entry);
+    }
+
+    private static string DescribeSteeringDirection(DiagnosticSession s, CaptureStepResult source)
+    {
+        var left = s.CaptureSteps.FirstOrDefault(c => c.StepId == "STEER_LEFT" && !c.Skipped);
+        var right = s.CaptureSteps.FirstOrDefault(c => c.StepId == "STEER_RIGHT" && !c.Skipped);
+        if (left == null || right == null)
+            return $" — center-rest, dir {source.DominantPressDirection}";
+
+        bool sameAxis =
+            left.DominantDeviceProductGuid == right.DominantDeviceProductGuid
+            && string.Equals(left.DominantAxisName, right.DominantAxisName, StringComparison.Ordinal);
+        if (!sameAxis || string.IsNullOrEmpty(left.DominantAxisName))
+            return $" — center-rest, left={left.DominantAxisName}, right={right.DominantAxisName}";
+
+        string leftDir = left.DominantPressDirection < 0 ? "decreases" :
+                         left.DominantPressDirection > 0 ? "increases" : "does not move";
+        string rightDir = right.DominantPressDirection > 0 ? "increases" :
+                          right.DominantPressDirection < 0 ? "decreases" : "does not move";
+
+        if (left.DominantPressDirection < 0 && right.DominantPressDirection > 0)
+            return $" — center-rest, normal direction (left {leftDir}, right {rightDir})";
+        if (left.DominantPressDirection > 0 && right.DominantPressDirection < 0)
+            return $" — center-rest, REVERSED direction (left {leftDir}, right {rightDir})";
+
+        return $" — center-rest, unusual direction (left {leftDir}, right {rightDir})";
     }
 
     private static void AddButtonAction(DiagnosticSession s, string action, string stepId)
@@ -390,13 +416,43 @@ public static class MappingAnalysis
         // which is actually Simucube / OpenFFBoard's reseller VID.
         if (vid == 0x346E || name.Contains("moza"))
         {
+            if (pid == 0x001F || name.Contains("hbp") || name.Contains("handbrake"))
+            {
+                return new FlatOutRule(
+                    Name: "MOZA HBP Handbrake (PID 0x001F)",
+                    SlotRouting: "ADDON handbrake slot; never steals the wheel slot",
+                    AxisMap: new()
+                    {
+                        ("HANDBRAKE", "slider[0] — handbrake axis"),
+                    },
+                    DirectDrive: false,
+                    Caveat: "The tool polls this as a separate add-on device alongside the selected wheel. " +
+                            "If the guided handbrake step says MISSED while DirectInput lists the HBP, the HBP " +
+                            "was probably not included in the polled-device set.");
+            }
+
+            if (pid == 0x0001 || pid == 0x0003)
+            {
+                return new FlatOutRule(
+                    Name: pid == 0x0001 ? "MOZA CRP Pedals" : "MOZA SR-P Pedals",
+                    SlotRouting: "ADDON pedal slot; suppresses wheel-base phantom pedal axes when connected",
+                    AxisMap: new()
+                    {
+                        ("THROTTLE", "lRx — released-low / floor-positive"),
+                        ("BRAKE",    "lRy — released-low / floor-positive"),
+                        ("CLUTCH",   "lRz — released-low / floor-positive"),
+                    },
+                    DirectDrive: false,
+                    Caveat: null);
+            }
+
             return new FlatOutRule(
                 Name: "MOZA R-series wheelbase (VID 0x346E)",
                 SlotRouting: "WHEEL slot 1; SR-P pedals route to ADDON slot if separately enumerated",
                 AxisMap: new()
                 {
                     ("STEER",    "lX"),
-                    ("THROTTLE", "lY or addon-device axis"),
+                    ("THROTTLE", "lZ or addon-device axis"),
                     ("BRAKE",    "lRz or addon-device axis"),
                     ("CLUTCH",   "slider[0] or addon-device axis"),
                 },
@@ -420,6 +476,26 @@ public static class MappingAnalysis
                 },
                 DirectDrive: true,
                 Caveat: "FFB strength scales to 0.50 friction-coefficient on DD bases to prevent stiction.");
+        }
+
+        // ── SimXperience AccuForce (VID 0x1FC9 / PID 0x804C) ─────
+        if (vid == 0x1FC9 || name.Contains("simxperience") || name.Contains("accuforce"))
+        {
+            return new FlatOutRule(
+                Name: pid == 0x804C ? "SimXperience AccuForce Pro (PID 0x804C)" : $"SimXperience / AccuForce class (PID 0x{pid:X4})",
+                SlotRouting: "WHEEL slot 1 (DD-friendly); separate pedals, shifters, and handbrakes route to add-on slots",
+                AxisMap: new()
+                {
+                    ("STEER",    "lX"),
+                    ("THROTTLE", "external pedal device"),
+                    ("BRAKE",    "external pedal device"),
+                    ("CLUTCH",   "external pedal device"),
+                    ("HANDBRAKE", "external handbrake add-on"),
+                },
+                DirectDrive: true,
+                Caveat: "FlatOut already has an exact WheelDeviceDB row for 0x804C1FC9. Normal DirectInput " +
+                        "steering is left=negative/right=positive; the report's steering-direction note tells " +
+                        "whether this user's wheel is actually reversed.");
         }
 
         // ── Simagic ───────────────────────────────────────────────
