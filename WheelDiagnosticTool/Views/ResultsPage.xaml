@@ -59,8 +59,8 @@
                                  AcceptsReturn="True"
                                  TextWrapping="NoWrap"
                                  Height="280"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  Text="(report not yet generated)"/>
                     </StackPanel>
                 </Border>

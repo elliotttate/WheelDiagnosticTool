@@ -65,7 +65,7 @@ public sealed partial class ResultsPage : Page
             ClipboardService.TrySetText(result.Url);
             Title.Text = "Report ready ✓";
             Subtitle.Text = "The shareable link has been copied to your clipboard.";
-            if (App.MainAppWindow is MainWindow mw) mw.SetStatus("Done — URL copied to clipboard");
+            if (App.MainAppWindow is MainWindow mwOk) mwOk.SetStatus("Done — URL copied to clipboard");
         }
         else
         {
@@ -75,7 +75,7 @@ public sealed partial class ResultsPage : Page
             RetryUploadButton.Visibility = Visibility.Visible;
             Title.Text = "Report ready (upload pending)";
             Subtitle.Text = "The .txt was written locally; upload to filebin.net failed and can be retried.";
-            if (App.MainAppWindow is MainWindow mw) mw.SetStatus("Upload failed");
+            if (App.MainAppWindow is MainWindow mwFail) mwFail.SetStatus("Upload failed");
         }
     }
 

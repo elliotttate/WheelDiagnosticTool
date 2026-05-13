@@ -77,7 +77,10 @@ public sealed class DirectInputService : IDisposable
         int axisCount = 0, buttonCount = 0, povCount = 0;
         foreach (var obj in objs)
         {
-            if ((obj.ObjectType & DeviceObjectTypeFlags.Axis) != 0)
+            // Vortice exposes the DI8 object semantic type via the bit-packed
+            // ObjectId flags, not via the GUID-typed ObjectType field.
+            var typeFlags = obj.ObjectId.Flags;
+            if ((typeFlags & DeviceObjectTypeFlags.Axis) != 0)
             {
                 axisCount++;
                 int min = 0, max = 0;
@@ -102,15 +105,15 @@ public sealed class DirectInputService : IDisposable
                     UsagePage = (ushort)obj.UsagePage,
                     Usage = (ushort)obj.Usage,
                     UsageMeaning = DecodeUsage((ushort)obj.UsagePage, (ushort)obj.Usage),
-                    HasForceFeedback = (obj.ObjectType & DeviceObjectTypeFlags.ForceFeedbackActuator) != 0,
+                    HasForceFeedback = (typeFlags & DeviceObjectTypeFlags.ForceFeedbackActuator) != 0,
                 });
             }
-            else if ((obj.ObjectType & DeviceObjectTypeFlags.Button) != 0)
+            else if ((typeFlags & DeviceObjectTypeFlags.Button) != 0)
             {
                 buttonCount++;
                 buttons.Add(new ButtonDescriptor { Index = buttons.Count });
             }
-            else if ((obj.ObjectType & DeviceObjectTypeFlags.PointOfViewController) != 0)
+            else if ((typeFlags & DeviceObjectTypeFlags.PointOfViewController) != 0)
             {
                 povCount++;
                 povs.Add(new PovDescriptor { Index = povs.Count });
@@ -201,7 +204,7 @@ public sealed class DirectInputService : IDisposable
             (int)DeviceType.Driving => "DRIVING",
             (int)DeviceType.Flight => "FLIGHT",
             (int)DeviceType.FirstPerson => "1STPERSON",
-            (int)DeviceType.DeviceCtrl => "DEVICECTRL",
+            (int)DeviceType.ControlDevice => "DEVICECTRL",
             (int)DeviceType.ScreenPointer => "SCREENPOINTER",
             (int)DeviceType.Remote => "REMOTE",
             (int)DeviceType.Supplemental => "SUPPLEMENTAL",
