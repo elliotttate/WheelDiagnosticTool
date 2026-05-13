@@ -20,17 +20,18 @@
   </PropertyGroup>
 
   <!--
-    Release single-file publish config. dotnet publish -c Release will pack
-    everything (managed + native + WindowsAppSDK) into one .exe that
-    self-extracts to %TEMP%/.net/<id>/ on first run.
+    Release publish config: self-contained .NET + WindowsAppSDK runtime,
+    multi-file output. We do NOT use PublishSingleFile because WinUI 3's
+    XAML markup compiler + Microsoft.UI.Xaml.dll fault with 0xC000027B
+    (STATUS_APPLICATION_INTERNAL_EXCEPTION) at startup when the DLLs are
+    in the self-extract temp dir instead of next to the exe.
+
+    For a single-download UX we build a 7-Zip self-extracting archive
+    around the publish folder — see scripts\build_sfx.ps1.
   -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <SelfContained>true</SelfContained>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

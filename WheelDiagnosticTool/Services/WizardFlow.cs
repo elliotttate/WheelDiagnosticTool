@@ -56,8 +56,8 @@ public static class WizardFlow
         new(typeof(CaptureStepPage), "Shift to gear 7 (skip if N/A)",           "GEAR_7"),
         new(typeof(CaptureStepPage), "Shift to REVERSE",                        "GEAR_R"),
 
-        // POV (hat)
-        new(typeof(CaptureStepPage), "Press each POV/HAT direction",  "POV_ALL"),
+        // D-pad / POV / hat
+        new(typeof(CaptureStepPage), "Press each D-pad / POV / hat direction",  "POV_ALL"),
 
         // Wheel-rim button discovery
         new(typeof(ButtonDiscoveryPage), "Identify wheel-rim buttons"),

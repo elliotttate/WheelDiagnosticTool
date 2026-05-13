@@ -99,15 +99,38 @@ public sealed partial class CaptureStepPage : Page
     {
         if (_poller == null) return;
         var (top, conf, reason) = _poller.PickDominant();
+        bool multiAxisExpected = IsMultiAxisExpectedStep(_stepId);
+
         if (top != null && top.MaxDeltaFromBaseline > 1500)
         {
-            DominantText.Text = $"Detected dominant axis: {top.DeviceProductName}::{top.AxisName}  (confidence: {conf})";
-            DominantRange.Text = $"baseline={top.Baseline}  range observed: {top.MinObserved}..{top.MaxObserved}   travel={top.Range}   press direction: {(top.PressDirection > 0 ? "+ (axis grows when pressed)" : top.PressDirection < 0 ? "- (axis shrinks when pressed)" : "0")}";
+            if (multiAxisExpected)
+            {
+                // For "press X and Y together" steps, list every axis with
+                // meaningful travel — calling one of them "dominant" is
+                // misleading when both are intentionally being pressed.
+                var moved = _poller.Axes.Values
+                    .Where(a => a.MaxDeltaFromBaseline > 5000)
+                    .OrderByDescending(a => a.MaxDeltaFromBaseline)
+                    .Take(4)
+                    .Select(a => $"{a.AxisName}@{a.MaxDeltaFromBaseline}")
+                    .ToList();
+                DominantText.Text = moved.Count == 0
+                    ? "Watching for both pedals to move..."
+                    : $"Co-actuated axes: {string.Join(", ", moved)}";
+                DominantRange.Text = $"top axis: {top.DeviceProductName}::{top.AxisName}  baseline={top.Baseline}  travel={top.Range}";
+            }
+            else
+            {
+                DominantText.Text = $"Detected dominant axis: {top.DeviceProductName}::{top.AxisName}  (confidence: {conf})";
+                DominantRange.Text = $"baseline={top.Baseline}  range observed: {top.MinObserved}..{top.MaxObserved}   travel={top.Range}   press direction: {(top.PressDirection > 0 ? "+ (axis grows when pressed)" : top.PressDirection < 0 ? "- (axis shrinks when pressed)" : "0")}";
+            }
         }
         else
         {
             DominantText.Text = _poller.BaselineCaptured
-                ? "Detected dominant axis: (waiting for >1500 deviation from baseline)"
+                ? (multiAxisExpected
+                    ? "Watching for both pedals to move..."
+                    : "Detected dominant axis: (waiting for >1500 deviation from baseline)")
                 : "Capturing idle baseline...";
             DominantRange.Text = "";
         }
@@ -185,6 +208,7 @@ public sealed partial class CaptureStepPage : Page
 
         var (top, conf, reason) = _poller.PickDominant();
         bool isButtonOriented = StepIsButtonOriented(_stepId);
+        bool isCrosstalkMulti = IsMultiAxisExpectedStep(_stepId);
         bool anyButtonPressed = _poller.ButtonEvents.Any(ev => ev.Pressed);
 
         // Validation prompt — once per step. If the step looks like it failed,
@@ -196,7 +220,15 @@ public sealed partial class CaptureStepPage : Page
                 warn = "No buttons were pressed during this step. If your shifter/paddle isn't firing, retry; otherwise click Next again to record this as 'no button fired'.";
             else if (!isButtonOriented && conf == CaptureConfidence.Missed)
                 warn = $"We only saw {(top?.MaxDeltaFromBaseline ?? 0)} units of motion on any axis. Did you complete the action? Retry, or click Next again to record this anyway.";
-            else if (conf == CaptureConfidence.Ambiguous)
+            // The "Ambiguous" warning fires when two axes moved by similar
+            // amounts. For "press X and Y together" crosstalk steps that's
+            // exactly what we asked the user to do — don't false-alarm them.
+            // The "_ONLY" crosstalk steps still benefit from suppressing this
+            // because any second-axis travel there is the actual diagnostic
+            // signal we want recorded; retrying won't make hardware bleed go
+            // away. The report's "Cross-axis bleed" section is where this
+            // info surfaces.
+            else if (conf == CaptureConfidence.Ambiguous && !isCrosstalkMulti && !IsCrosstalkStep(_stepId))
                 warn = $"Two axes moved by similar amounts ({reason}). Retry while only moving the intended control, or click Next again to record this anyway.";
 
             if (warn != null)
@@ -252,6 +284,12 @@ public sealed partial class CaptureStepPage : Page
             or "GEAR_5" or "GEAR_6" or "GEAR_7" or "GEAR_R";
 
     private static bool IsCrosstalkStep(string stepId) => stepId.StartsWith("CROSSTALK_");
+
+    // Crosstalk steps that EXPECT two axes to be actuated together. Distinct
+    // from CROSSTALK_*_ONLY which expects one axis (and uses bleed-detection
+    // on the others).
+    private static bool IsMultiAxisExpectedStep(string stepId) =>
+        stepId is "CROSSTALK_T_AND_B" or "CROSSTALK_CLUTCH_AND_THROTTLE";
 
     private void Advance()
     {

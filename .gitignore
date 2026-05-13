@@ -2,6 +2,8 @@ bin/
 obj/
 *.zip
 WheelDiagnosticTool-v*.exe
+Launcher/Resources/*.zip
+sfx-stage/
 .vs/
 *.user
 *.suo

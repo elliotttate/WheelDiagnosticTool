@@ -19,7 +19,12 @@ public sealed partial class MainWindow : Window
             AppServices.MainWindowHandle = hwnd;
             var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
-            appWindow.Resize(new Windows.Graphics.SizeInt32(1100, 760));
+            // Sized for the densest pages — per-axis capture table on a wheel
+            // with a separate pedal addon (Fanatec ClubSport + H-shifter) takes
+            // ~24 axis rows + the live monitor card + buttons. 1500x950 keeps
+            // the layout from clipping on a 1080p display while still leaving
+            // room around it.
+            appWindow.Resize(new Windows.Graphics.SizeInt32(1500, 950));
         }
         catch
         {
