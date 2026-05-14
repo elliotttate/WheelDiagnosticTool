@@ -259,6 +259,7 @@ public sealed partial class CaptureStepPage : Page
         result.ConfidenceReason = reason;
 
         foreach (var ev in _poller.ButtonEvents) result.ButtonEvents.Add(ev);
+        foreach (var h in _poller.HeldThroughoutStep) result.ButtonsHeldThroughout.Add(h);
         foreach (var kv in _poller.PrimaryPovs) result.PovValues[kv.Key] = kv.Value;
 
         // Crosstalk bleed: for crosstalk-specific steps, snapshot every

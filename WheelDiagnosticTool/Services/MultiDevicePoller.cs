@@ -53,6 +53,55 @@ public sealed class MultiDevicePoller
     public IReadOnlyList<ButtonEvent> ButtonEvents => _events;
     public IReadOnlyDictionary<int, int> PrimaryPovs => _povsPrimary;
 
+    /// <summary>
+    /// Buttons that were pressed when the baseline window closed and never
+    /// released during the step. These are either:
+    ///   - Phantom / stuck button bits the device reports continuously (a
+    ///     real failure mode — joeytman's wheel reports btn10 as pressed
+    ///     for every step regardless of user activity).
+    ///   - A button the user happens to be holding (paddle, button-box
+    ///     toggle, shifter rest position).
+    /// Either way, surfacing them per step lets the triager spot why the
+    ///   inferred mapping might be missing a button (the baseline-snapshot
+    ///   fix correctly suppresses press events for these, but without this
+    ///   list the user has no signal as to why their paddle wasn't captured).
+    /// </summary>
+    public IReadOnlyList<HeldButtonRow> HeldThroughoutStep
+    {
+        get
+        {
+            var rows = new List<HeldButtonRow>();
+            foreach (var kv in _buttonPrevState)
+            {
+                if (!kv.Value) continue;
+                var (guid, idx) = kv.Key;
+                bool hadReleaseDuringStep = false;
+                for (int i = 0; i < _events.Count; i++)
+                {
+                    var ev = _events[i];
+                    if (ev.DeviceProductGuid == guid && ev.ButtonIndex == idx && !ev.Pressed)
+                    {
+                        hadReleaseDuringStep = true;
+                        break;
+                    }
+                }
+                if (hadReleaseDuringStep) continue;
+                string deviceName = "";
+                for (int i = 0; i < _devices.Count; i++)
+                {
+                    if (_devices[i].ProductGuidData1 == guid) { deviceName = _devices[i].ProductName; break; }
+                }
+                rows.Add(new HeldButtonRow
+                {
+                    DeviceProductName = deviceName,
+                    DeviceProductGuid = guid,
+                    ButtonIndex = idx,
+                });
+            }
+            return rows;
+        }
+    }
+
     public void ResetBaseline(int frames = 30)
     {
         _baselineCaptured = false;
@@ -178,9 +227,20 @@ public sealed class MultiDevicePoller
             if (delta > obs.MaxDeltaFromBaseline) obs.MaxDeltaFromBaseline = delta;
             if (delta > 1500) obs.SeenMotion = true;
 
-            int signed = value - obs.Baseline;
-            if (Math.Abs(signed) > Math.Abs(obs.PressDirection * obs.MaxDeltaFromBaseline))
-                obs.PressDirection = signed > 0 ? +1 : -1;
+            // Press direction = which side of baseline did the axis travel
+            // FARTHER. Previous version compared each sample against the
+            // already-updated MaxDeltaFromBaseline — once MaxDelta caught
+            // up to the new sample's |signed|, the > comparison was never
+            // satisfied again, so PressDirection got pinned to whatever
+            // the first non-zero sample's sign was. A small idle blip in
+            // one direction could then override a much larger real motion
+            // the other way (MackRole's STEER_LEFT reported as +1 despite
+            // the axis travelling from baseline=17 down to -32768).
+            int below = obs.Baseline - (obs.MinObserved == int.MaxValue ? obs.Baseline : obs.MinObserved);
+            int above = (obs.MaxObserved == int.MinValue ? obs.Baseline : obs.MaxObserved) - obs.Baseline;
+            if (below > above) obs.PressDirection = -1;
+            else if (above > below) obs.PressDirection = +1;
+            else obs.PressDirection = 0;
         }
     }
 

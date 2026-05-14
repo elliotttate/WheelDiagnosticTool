@@ -417,6 +417,23 @@ public static class ReportWriter
                 sb.AppendLine("    button events  : (none)");
             }
 
+            // Buttons held throughout the step — surfaces stuck/phantom
+            // bits like joeytman's btn10 (reports as pressed every step
+            // without user input). These do NOT enter the inferred-mapping
+            // pipeline (the baseline-snapshot fix correctly ignores them
+            // as events) but the triager needs to see them to understand
+            // why a paddle/gear step might appear empty on a hardware
+            // that has a phantom button.
+            if (step.ButtonsHeldThroughout.Count > 0)
+            {
+                sb.AppendLine("    buttons held throughout this step (stuck-active at baseline AND never released —");
+                sb.AppendLine("    either the user is holding them or the device reports them stuck/phantom):");
+                foreach (var h in step.ButtonsHeldThroughout)
+                {
+                    sb.AppendLine($"      {Trim(h.DeviceProductName, 30),-30}  btn {h.ButtonIndex}");
+                }
+            }
+
             if (step.PovValues.Count > 0)
             {
                 foreach (var kv in step.PovValues)
@@ -483,6 +500,7 @@ public static class ReportWriter
         }
         else
         {
+            bool sawDirectionMismatch = false;
             foreach (var e in f.Effects)
             {
                 string felt = e.UserFelt switch
@@ -491,8 +509,34 @@ public static class ReportWriter
                     false => "NOT FELT",
                     null => "(not asked)"
                 };
-                sb.AppendLine($"    {e.EffectName,-22}  hr=0x{(uint)e.HResult:X8}  create={(e.CreateSucceeded ? "OK" : "FAILED")}  user={felt}");
+                string suffix = "";
+                if (!string.IsNullOrEmpty(e.IntendedDirection) && !string.IsNullOrEmpty(e.UserDirection))
+                {
+                    if (e.UserDirection == "none")
+                        suffix = $"  user direction=NONE (intended={e.IntendedDirection.ToUpper()})";
+                    else if (string.Equals(e.IntendedDirection, e.UserDirection, StringComparison.OrdinalIgnoreCase))
+                        suffix = $"  user direction={e.UserDirection.ToUpper()} matches intent";
+                    else
+                    {
+                        suffix = $"  user direction={e.UserDirection.ToUpper()} INVERTED from intended {e.IntendedDirection.ToUpper()}";
+                        sawDirectionMismatch = true;
+                    }
+                }
+                sb.AppendLine($"    {e.EffectName,-42}  hr=0x{(uint)e.HResult:X8}  create={(e.CreateSucceeded ? "OK" : "FAILED")}  user={felt}{suffix}");
                 if (!string.IsNullOrEmpty(e.Note)) sb.AppendLine($"        note: {e.Note}");
+            }
+
+            if (sawDirectionMismatch)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  *** FFB direction inverted relative to engine convention. The wheel feels");
+                sb.AppendLine("      negative-magnitude force as a RIGHT pull (and positive as LEFT). Common");
+                sb.AppendLine("      on AccuForce / DIY DD firmware. Cross-reference with the steering");
+                sb.AppendLine("      direction verdict in the inferred mapping at the top of the report:");
+                sb.AppendLine("        - If steering AXIS is normal AND FFB is inverted: pure FFB-sign issue,");
+                sb.AppendLine("          would need an 'invert FFB' toggle in the engine.");
+                sb.AppendLine("        - If steering AXIS is reversed AND FFB is inverted: they cancel —");
+                sb.AppendLine("          the engine's lean-axis inversion repair would also invert FFB sign.");
             }
         }
         sb.AppendLine();

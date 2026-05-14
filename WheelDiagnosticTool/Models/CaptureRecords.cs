@@ -42,6 +42,20 @@ public sealed class ButtonEvent
 }
 
 /// <summary>
+/// A button that was pressed when the step's baseline window closed and
+/// was never released during the step. Either the user is holding it on
+/// purpose or it is a phantom/stuck button bit the device reports
+/// continuously. Surfaced separately from ButtonEvents so the report can
+/// flag it without it polluting paddle/gear inference.
+/// </summary>
+public sealed class HeldButtonRow
+{
+    public string DeviceProductName { get; init; } = "";
+    public uint DeviceProductGuid { get; init; }
+    public int ButtonIndex { get; init; }
+}
+
+/// <summary>
 /// Result of a single guided capture step. Stores every axis observation
 /// plus the picked dominant axis, so the report can show both "what we
 /// decided" and "what we considered". Confidence reflects how sure the
@@ -71,6 +85,7 @@ public sealed class CaptureStepResult
     public string? ConfidenceReason { get; set; }
     public List<AxisObservation> Axes { get; init; } = new();
     public List<ButtonEvent> ButtonEvents { get; init; } = new();
+    public List<HeldButtonRow> ButtonsHeldThroughout { get; init; } = new();
     public Dictionary<int, int> PovValues { get; init; } = new(); // pov index -> last value (single-device, primary wheel)
     public DateTime CapturedUtc { get; init; } = DateTime.UtcNow;
     public bool Skipped { get; set; }
@@ -103,6 +118,17 @@ public sealed class FfbEffectResult
     public int HResult { get; set; }
     public bool CreateSucceeded { get; set; }
     public bool? UserFelt { get; set; } // null = not asked, true/false = answered
+
+    // For direction-meaningful effects (constant force left / right):
+    // "left" / "right" / "none" / null. Lets the report cross-reference
+    // axis direction against FFB direction (the AccuForce-style mismatch
+    // where lX moves correctly but constant-force sign is inverted).
+    public string? UserDirection { get; set; }
+
+    // The intended direction the effect should have pulled if the device
+    // followed the standard sign convention. Set by the prompt code.
+    public string? IntendedDirection { get; set; }
+
     public string? Note { get; set; }
 }
 

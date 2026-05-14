@@ -78,11 +78,11 @@ public sealed partial class FfbProbePage : Page
         _cts = new CancellationTokenSource();
         try
         {
-            await RunEffect("Constant force (left 3 sec)",  () => AppServices.Ffb.TestConstantForceAsync(-7000, 3000, _cts.Token));
-            await RunEffect("Constant force (right 3 sec)", () => AppServices.Ffb.TestConstantForceAsync(+7000, 3000, _cts.Token));
-            await RunEffect("Spring (3 sec)",               () => AppServices.Ffb.TestSpringAsync(3000, _cts.Token));
-            await RunEffect("Damper (3 sec)",               () => AppServices.Ffb.TestDamperAsync(3000, _cts.Token));
-            await RunEffect("Sine vibration (3 sec)",       () => AppServices.Ffb.TestSineAsync(3000, 100, _cts.Token));
+            await RunEffect("Constant force (intended LEFT, 3 sec)",  () => AppServices.Ffb.TestConstantForceAsync(-7000, 3000, _cts.Token), intendedDirection: "left");
+            await RunEffect("Constant force (intended RIGHT, 3 sec)", () => AppServices.Ffb.TestConstantForceAsync(+7000, 3000, _cts.Token), intendedDirection: "right");
+            await RunEffect("Spring (3 sec)",                         () => AppServices.Ffb.TestSpringAsync(3000, _cts.Token));
+            await RunEffect("Damper (3 sec)",                         () => AppServices.Ffb.TestDamperAsync(3000, _cts.Token));
+            await RunEffect("Sine vibration (3 sec)",                 () => AppServices.Ffb.TestSineAsync(3000, 100, _cts.Token));
         }
         finally
         {
@@ -93,15 +93,16 @@ public sealed partial class FfbProbePage : Page
         }
     }
 
-    private async Task RunEffect(string label, Func<Task<FfbEffectResult>> run)
+    private async Task RunEffect(string label, Func<Task<FfbEffectResult>> run, string? intendedDirection = null)
     {
-        var row = new EffectRow(label);
+        var row = new EffectRow(label, intendedDirection);
         _rows.Add(row);
         EffectRows.ItemsSource = null;
         EffectRows.ItemsSource = BuildRowElements();
 
         if (App.MainAppWindow is MainWindow mw) mw.SetStatus($"Playing: {label}");
         var result = await run();
+        result.IntendedDirection = intendedDirection;
         row.Result = result;
         DiagnosticSession.Instance.FfbProbe.Effects.Add(result);
 
@@ -148,11 +149,16 @@ public sealed partial class FfbProbePage : Page
     private sealed class EffectRow
     {
         public string Label { get; }
+        public string? IntendedDirection { get; }
         public FfbEffectResult? Result { get; set; }
         public bool Awaiting { get; set; }
         public TaskCompletionSource<bool> FeltCompletion { get; } = new();
 
-        public EffectRow(string label) => Label = label;
+        public EffectRow(string label, string? intendedDirection = null)
+        {
+            Label = label;
+            IntendedDirection = intendedDirection;
+        }
 
         public UIElement Build()
         {
@@ -171,28 +177,76 @@ public sealed partial class FfbProbePage : Page
             string statusLine;
             if (Result == null) statusLine = "playing...";
             else if (!Result.CreateSucceeded) statusLine = $"CreateEffect FAILED  hr=0x{(uint)Result.HResult:X8}";
-            else if (Result.UserFelt == true) statusLine = $"played OK  →  user FELT it";
-            else if (Result.UserFelt == false) statusLine = $"played OK  →  user did NOT feel it";
+            else if (IntendedDirection != null && Result.UserDirection != null)
+            {
+                string match = string.Equals(IntendedDirection, Result.UserDirection, StringComparison.OrdinalIgnoreCase)
+                    ? "matches intended direction"
+                    : Result.UserDirection == "none"
+                        ? "user felt no force"
+                        : $"INVERTED relative to intended direction ({IntendedDirection})";
+                statusLine = $"played OK  →  user said wheel pulled {Result.UserDirection.ToUpper()}  ({match})";
+            }
+            else if (Result.UserFelt == true) statusLine = "played OK  →  user FELT it";
+            else if (Result.UserFelt == false) statusLine = "played OK  →  user did NOT feel it";
             else statusLine = "played OK — waiting for your answer below";
             sp.Children.Add(new TextBlock { Text = statusLine, Opacity = 0.85 });
 
             if (Awaiting)
             {
                 var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
-                var yes = new Button { Content = "I felt it" };
-                yes.Click += (_, _) =>
+                if (IntendedDirection != null)
                 {
-                    Result!.UserFelt = true;
-                    FeltCompletion.TrySetResult(true);
-                };
-                var no = new Button { Content = "Nothing" };
-                no.Click += (_, _) =>
+                    // Direction-meaningful effect (constant force): three buttons.
+                    sp.Children.Add(new TextBlock
+                    {
+                        Text = $"Which way did the wheel pull? (intended: {IntendedDirection.ToUpper()})",
+                        Opacity = 0.85,
+                        Margin = new Thickness(0, 4, 0, 0),
+                    });
+
+                    var bLeft = new Button { Content = "It pulled LEFT" };
+                    bLeft.Click += (_, _) =>
+                    {
+                        Result!.UserDirection = "left";
+                        Result!.UserFelt = true;
+                        FeltCompletion.TrySetResult(true);
+                    };
+                    var bRight = new Button { Content = "It pulled RIGHT" };
+                    bRight.Click += (_, _) =>
+                    {
+                        Result!.UserDirection = "right";
+                        Result!.UserFelt = true;
+                        FeltCompletion.TrySetResult(true);
+                    };
+                    var bNone = new Button { Content = "Nothing happened" };
+                    bNone.Click += (_, _) =>
+                    {
+                        Result!.UserDirection = "none";
+                        Result!.UserFelt = false;
+                        FeltCompletion.TrySetResult(true);
+                    };
+                    btnRow.Children.Add(bLeft);
+                    btnRow.Children.Add(bRight);
+                    btnRow.Children.Add(bNone);
+                }
+                else
                 {
-                    Result!.UserFelt = false;
-                    FeltCompletion.TrySetResult(true);
-                };
-                btnRow.Children.Add(yes);
-                btnRow.Children.Add(no);
+                    // Non-directional (spring/damper/sine): keep the simple yes/no.
+                    var yes = new Button { Content = "I felt it" };
+                    yes.Click += (_, _) =>
+                    {
+                        Result!.UserFelt = true;
+                        FeltCompletion.TrySetResult(true);
+                    };
+                    var no = new Button { Content = "Nothing" };
+                    no.Click += (_, _) =>
+                    {
+                        Result!.UserFelt = false;
+                        FeltCompletion.TrySetResult(true);
+                    };
+                    btnRow.Children.Add(yes);
+                    btnRow.Children.Add(no);
+                }
                 sp.Children.Add(btnRow);
             }
 
