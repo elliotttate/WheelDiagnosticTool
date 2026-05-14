@@ -270,13 +270,24 @@ public sealed class MultiDevicePoller
         if (top == null) return (null, CaptureConfidence.Missed, $"no axis exceeded {motionThreshold} from baseline");
 
         // Ambiguous if a different physical axis (not the same axis on a
-        // different device) is within 30% of the leader's travel.
+        // different device) is within 30% of the leader's travel — AND it
+        // lives on a different device. Same-device runner-ups are nearly
+        // always a wheel quirk: Fanatec rims encode the rim D-pad as four
+        // independent half-axes that spike to 32767 momentarily even
+        // during steering steps, which would otherwise drag every clean
+        // steering capture into the "AMBIGUOUS" bucket (Mobilistic's
+        // FANATEC Wheel STEER_LEFT had lX hit -32768 cleanly and was
+        // still marked AMBIGUOUS because lY also went to 32767).
+        // Cross-device runner-ups are the meaningful case: e.g. a pedal
+        // axis registering on both pedal devices because of a wiring
+        // overlap.
         if (second != null
             && !string.Equals(second.AxisName, top.AxisName, StringComparison.Ordinal)
+            && second.DeviceProductGuid != top.DeviceProductGuid
             && second.MaxDeltaFromBaseline > (top.MaxDeltaFromBaseline * 0.7))
         {
             return (top, CaptureConfidence.Ambiguous,
-                $"top={top.AxisName}@{top.MaxDeltaFromBaseline} vs runner-up={second.AxisName}@{second.MaxDeltaFromBaseline}");
+                $"top={top.DeviceProductName}::{top.AxisName}@{top.MaxDeltaFromBaseline} vs runner-up={second.DeviceProductName}::{second.AxisName}@{second.MaxDeltaFromBaseline} (different devices)");
         }
 
         if (top.MaxDeltaFromBaseline >= 20000) return (top, CaptureConfidence.High, $"{top.MaxDeltaFromBaseline} units of travel");

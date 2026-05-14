@@ -37,6 +37,117 @@ public static class MappingAnalysis
         AddButtonAction(s, "PADDLE_DOWN", "PADDLE_DOWN");
         for (int i = 1; i <= 7; i++) AddButtonAction(s, $"GEAR_{i}", $"GEAR_{i}");
         AddButtonAction(s, "GEAR_R", "GEAR_R");
+
+        AddPovAction(s);
+    }
+
+    /// <summary>
+    /// POV / D-pad detection. Three patterns observed in the wild:
+    ///   1. Real DirectInput POV control fires (state.PointOfViewControllers
+    ///      transitions to a non-(-1) value). Easy case.
+    ///   2. The rim D-pad is encoded as 4 momentary half-axes — each
+    ///      direction is its own axis going 0..max when pressed and
+    ///      returning to 0 when released. Common Fanatec FunkySwitch
+    ///      pattern. No POV ever fires in DI; the user sees "POV 0
+    ///      ended at value -1" and (Mobilistic's report) concludes the
+    ///      tool didn't detect their D-pad.
+    ///   3. The D-pad is plain buttons (one per direction).
+    /// We surface all three explicitly so the report says what it is,
+    /// instead of leaving the data buried in the per-axis observation table.
+    /// </summary>
+    private static void AddPovAction(DiagnosticSession s)
+    {
+        var entry = new InferredMappingEntry { Action = "POV / D-PAD" };
+        var step = s.CaptureSteps.FirstOrDefault(c => c.StepId == "POV_ALL");
+        if (step == null)
+        {
+            entry.Confidence = CaptureConfidence.Missed;
+            entry.Note = "POV step not run";
+            s.InferredMapping.Add(entry);
+            return;
+        }
+        if (step.Skipped)
+        {
+            entry.Confidence = CaptureConfidence.NotApplicable;
+            entry.Note = "step skipped";
+            s.InferredMapping.Add(entry);
+            return;
+        }
+
+        // Pattern 1: a real DI POV control was active at end of step. The
+        // PovValues we record is "last value seen", which is the safe
+        // signal here — if any POV ended pressed, it's a real POV.
+        foreach (var kv in step.PovValues)
+        {
+            if (kv.Value >= 0)
+            {
+                entry.SourceDeviceName = s.SelectedDevice?.ProductName ?? "";
+                entry.SourceDeviceProductGuid = s.SelectedDevice?.ProductGuidData1 ?? 0;
+                entry.Detail = $"DirectInput POV index {kv.Key} (last value {kv.Value}/100°)";
+                entry.Confidence = CaptureConfidence.High;
+                s.InferredMapping.Add(entry);
+                return;
+            }
+        }
+
+        // Pattern 2: no POV fired, but multiple axes on the primary wheel
+        // spiked during the step. We look specifically on the SELECTED
+        // device because pedal devices may also wiggle by accident.
+        var primaryGuid = s.SelectedDevice?.ProductGuidData1 ?? 0;
+        var primarySpikes = step.Axes
+            .Where(a => a.DeviceProductGuid == primaryGuid && a.MaxDeltaFromBaseline > 5000)
+            .OrderByDescending(a => a.MaxDeltaFromBaseline)
+            .ToList();
+
+        if (primarySpikes.Count >= 2)
+        {
+            var axisList = string.Join(", ", primarySpikes.Take(8).Select(a => a.AxisName));
+            entry.SourceDeviceName = primarySpikes[0].DeviceProductName;
+            entry.SourceDeviceProductGuid = primaryGuid;
+            entry.Detail = $"axis-encoded D-pad — {primarySpikes.Count} momentary half-axes ({axisList})";
+            entry.Confidence = CaptureConfidence.High;
+            entry.Note = "No DI POV control fired; each direction is reported as its own axis spiking 0→max " +
+                        "when pressed (Fanatec FunkySwitch / custom-wheel pattern). Engine binding code must " +
+                        "treat these as buttons / per-direction axes, NOT as a POV.";
+            s.InferredMapping.Add(entry);
+            return;
+        }
+
+        // Pattern 3: nothing on axes, but buttons fired (D-pad as plain buttons).
+        var pressedButtons = step.ButtonEvents
+            .Where(ev => ev.Pressed && ev.DeviceProductGuid == primaryGuid)
+            .GroupBy(ev => ev.ButtonIndex)
+            .Select(g => g.Key)
+            .OrderBy(b => b)
+            .ToList();
+
+        if (pressedButtons.Count >= 4)
+        {
+            entry.SourceDeviceName = s.SelectedDevice?.ProductName ?? "";
+            entry.SourceDeviceProductGuid = primaryGuid;
+            entry.Detail = $"button-encoded D-pad — buttons {string.Join(", ", pressedButtons)}";
+            entry.Confidence = CaptureConfidence.High;
+            entry.Note = "Each D-pad direction fires its own button index.";
+            s.InferredMapping.Add(entry);
+            return;
+        }
+
+        if (pressedButtons.Count > 0)
+        {
+            entry.SourceDeviceName = s.SelectedDevice?.ProductName ?? "";
+            entry.SourceDeviceProductGuid = primaryGuid;
+            entry.Detail = $"click only — buttons {string.Join(", ", pressedButtons)}";
+            entry.Confidence = CaptureConfidence.Low;
+            entry.Note = "No POV control, axis-encoded directions, or 4+ direction buttons detected — only " +
+                        "the D-pad click-in (or whatever button(s) fired). User may not have pressed all " +
+                        "four directions, or the device encodes directions differently.";
+            s.InferredMapping.Add(entry);
+            return;
+        }
+
+        entry.Confidence = CaptureConfidence.Missed;
+        entry.Note = "no POV control, axes, or buttons activated during the POV step";
+        s.InferredMapping.Add(entry);
     }
 
     private static void AddSingleAxisAction(DiagnosticSession s, string action,
